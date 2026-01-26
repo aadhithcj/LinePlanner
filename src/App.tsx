@@ -3,31 +3,39 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import HomePage from "./pages/HomePage";
-import CreateLinePage from "./pages/CreateLinePage";
-import ViewLinesPage from "./pages/ViewLinesPage";
-import LinePlannerPage from "./pages/LinePlannerPage";
-import NotFound from "./pages/NotFound";
+
+/* MAIN HOME */
+import HomeScreenPage from "./pages/HomeScreenPage";
+
+/* LINE PLANNER MODULE */
+import PlanHomePage from "./pages/LinePlanner/PlanHomePage";
+import CreateLinePage from "./pages/LinePlanner/CreateLinePage";
+import ViewLinesPage from "./pages/LinePlanner/ViewLinesPage";
+import LinePlannerPage from "./pages/LinePlanner/LinePlannerPage";
 
 const queryClient = new QueryClient();
 
-const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/create" element={<CreateLinePage />} />
-          <Route path="/lines" element={<ViewLinesPage />} />
-          <Route path="/planner" element={<LinePlannerPage />} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
-    </TooltipProvider>
-  </QueryClientProvider>
-);
+export default function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <Routes>
 
-export default App;
+            {/* HOME */}
+            <Route path="/" element={<HomeScreenPage />} />
+
+            {/* LINE PLANNER MODULE */}
+            <Route path="/line-planner" element={<PlanHomePage />} />
+            <Route path="/line-planner/create" element={<CreateLinePage />} />
+            <Route path="/line-planner/lines" element={<ViewLinesPage />} />
+            <Route path="/line-planner/planner" element={<LinePlannerPage />} />
+
+          </Routes>
+        </BrowserRouter>
+      </TooltipProvider>
+    </QueryClientProvider>
+  );
+}

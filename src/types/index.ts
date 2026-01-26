@@ -1,5 +1,3 @@
-// Core types for the 3D Line Planner Application
-
 /**
  * Normalized operation data structure
  * This is what we convert raw Excel data into
@@ -10,7 +8,16 @@ export interface Operation {
   machine_type: string;
   smv: number;
   section: string;
+
 }
+export type ColumnAliases = {
+  op_no: string[];
+  op_name: string[];
+  machine_type: string[];
+  smv: string[];
+  section: string[];
+};
+
 
 /**
  * Machine position in 3D space
@@ -28,6 +35,12 @@ export interface MachinePosition {
     y: number;
     z: number;
   };
+  // ✅ New fields for layout logic
+  lane?: 'A' | 'B' | 'C' | 'D';
+  isTrolley?: boolean;
+  isInspection?: boolean;
+  section?: string;
+  machineIndex?: number; // 0 for first machine of this op, 1 for second, etc.
 }
 
 /**
@@ -37,43 +50,24 @@ export interface LineData {
   id: string;
   lineNo: string;
   styleNo: string;
+  coneNo: string;
   createdAt: string;
   updatedAt: string;
   operations: Operation[];
   machineLayout: MachinePosition[];
   totalSMV: number;
+  // ✅ New fields for line balancing
+  targetOutput: number;
+  workingHours: number;
 }
 
 /**
  * Machine type categories for 3D models and colors
  */
-export type MachineCategory = 
+export type MachineCategory =
   | 'snls'      // Single Needle Lock Stitch
   | 'snec'      // Overlock/Edge cutting
   | 'iron'      // Iron/Pressing
   | 'button'    // Button hole/sewing
   | 'bartack'   // Bartack machine
-  | 'special'   // Special machines
-  | 'helper'    // Helper tables
-  | 'default';  // Unknown/Other
-
-/**
- * UI state for modals and panels
- */
-export interface UIState {
-  isMachineInfoOpen: boolean;
-  isFileUploadOpen: boolean;
-  isLoading: boolean;
-  loadingMessage: string;
-}
-
-/**
- * Column mapping aliases for Excel parsing
- */
-export interface ColumnAliases {
-  op_no: string[];
-  op_name: string[];
-  machine_type: string[];
-  smv: string[];
-  section: string[];
-}
+  | 'special'   // Special ma

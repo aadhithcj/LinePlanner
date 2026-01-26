@@ -10,7 +10,7 @@ import { SceneLighting } from './SceneLighting';
  */
 export const Scene3D = () => {
   const { machineLayout, selectedMachine } = useLineStore();
-  
+
   return (
     <div className="w-full h-full">
       <Canvas
@@ -23,22 +23,25 @@ export const Scene3D = () => {
       >
         {/* Fog for depth effect */}
         <fog attach="fog" args={['#0f172a', 15, 60]} />
-        
+
         {/* Lighting setup */}
         <SceneLighting />
-        
+
         {/* Ground plane with grid */}
         <Ground />
-        
+
         {/* Machines */}
-        {machineLayout.map((machine) => (
-          <Machine3D key={machine.id} machineData={machine} />
-        ))}
-        
+        {/* Revert rotation to 0 so line runs along X-axis as per user request */}
+        <group rotation={[0, 0, 0]}>
+          {machineLayout.map((machine) => (
+            <Machine3D key={machine.id} machineData={machine} />
+          ))}
+        </group>
+
         {/* Camera controls */}
-        <CameraController 
-          machineLayout={machineLayout} 
-          selectedMachine={selectedMachine} 
+        <CameraController
+          machineLayout={machineLayout}
+          selectedMachine={selectedMachine}
         />
       </Canvas>
     </div>
