@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, RotateCcw, Factory, Clock, Layers, Settings, Filter, Eye } from 'lucide-react';
+import { ArrowLeft, Save, RotateCcw, Factory, Clock, Layers, Settings, Filter, Eye, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Scene3D } from '@/components/3d/Scene3D';
 import { MachineInfoPanel } from '@/components/ui/MachineInfoPanel';
 import { useLineStore } from '@/store/useLineStore';
@@ -22,6 +23,7 @@ const LinePlannerPage = () => {
     currentLine,
     machineLayout,
     operations,
+    validationErrors,
     saveLine,
     setSelectedMachine,
     generateMachineLayout
@@ -312,10 +314,31 @@ const LinePlannerPage = () => {
 
         {/* 3D Scene */}
         <div className="flex-1 relative bg-black/10">
+
+
           {(machineLayout?.length || 0) > 0 ? (
             <>
               <Scene3D />
               <MachineInfoPanel />
+
+              {/* Validation Alerts Overlay */}
+              {validationErrors && validationErrors.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="absolute top-6 left-6 z-50 w-96 space-y-2 pointer-events-none"
+                >
+                  {validationErrors.map((error, idx) => (
+                    <Alert key={idx} variant="destructive" className="bg-destructive/90 text-destructive-foreground border-none pointer-events-auto shadow-lg backdrop-blur-sm">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertTitle>Layout Overflow</AlertTitle>
+                      <AlertDescription>
+                        {error}
+                      </AlertDescription>
+                    </Alert>
+                  ))}
+                </motion.div>
+              )}
 
               {/* Controls Help Overlay */}
               <motion.div

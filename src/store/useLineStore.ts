@@ -9,6 +9,7 @@ interface LineStore {
 
   machineLayout: MachinePosition[];
   operations: Operation[];
+  validationErrors: string[]; // ✅ Added validation errors
 
   selectedMachine: MachinePosition | null;
 
@@ -45,6 +46,7 @@ export const useLineStore = create<LineStore>()(persist((set, get) => ({
 
   machineLayout: [],
   operations: [],
+  validationErrors: [],
   selectedMachine: null,
   targetOutput: 1000,
   workingHours: 8,
@@ -63,10 +65,19 @@ export const useLineStore = create<LineStore>()(persist((set, get) => ({
 
   // ✅ CENTRAL layout generator
   generateMachineLayout: (operations) => {
-    const { targetOutput, workingHours } = get();
+    const { targetOutput, workingHours, currentLine } = get();
     // Use the sophisticated layout engine
-    const layout = generateLayout(operations, targetOutput, workingHours);
-    set({ machineLayout: layout });
+    const { layout, errors } = generateLayout(
+      operations,
+      targetOutput,
+      workingHours,
+      currentLine?.lineNo || 'Line 1'
+    );
+
+    set({
+      machineLayout: layout,
+      validationErrors: errors
+    });
   },
 
   // ✅ Excel upload should call this
@@ -85,7 +96,7 @@ export const useLineStore = create<LineStore>()(persist((set, get) => ({
     const workingHours = 8;
 
     // Trigger layout generation via utility
-    const layout = generateLayout(operations, targetOutput, workingHours);
+    const { layout, errors } = generateLayout(operations, targetOutput, workingHours, lineNo);
 
     const line: LineData = {
       id: crypto.randomUUID(),
@@ -103,6 +114,7 @@ export const useLineStore = create<LineStore>()(persist((set, get) => ({
 
     set({
       machineLayout: layout,
+      validationErrors: errors,
       operations,
       currentLine: line,
       selectedMachine: null,
@@ -125,10 +137,19 @@ export const useLineStore = create<LineStore>()(persist((set, get) => ({
     const line = get().savedLines.find((l) => l.id === id) || null;
     if (!line) return;
 
+    // Re-validate on load to show errors if any
+    const { layout, errors } = generateLayout(
+      line.operations,
+      line.targetOutput || 1000,
+      line.workingHours || 8,
+      line.lineNo
+    );
+
     set({
       currentLine: line,
       operations: line.operations,
-      machineLayout: line.machineLayout,
+      machineLayout: layout, // Use fresh layout/validation
+      validationErrors: errors,
       targetOutput: line.targetOutput || 1000, // Restore params
       workingHours: line.workingHours || 8,
       selectedMachine: null,

@@ -1,27 +1,16 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { Operation, MachinePosition } from '@/types';
 import { calculateMachineRequirements } from './lineBalancing';
+import { getMachineDimensions, SECTION_DIMENSIONS } from './dimensions';
 
 // Constants (Units: Approx Meters)
 const LANE_Z_A = -5.2;
-const LANE_Z_B = -6.8; // Spacing 1.6m (-5.2 - -6.8)
+const LANE_Z_B = -6.8;
 const LANE_Z_C = 0.75;
-const LANE_Z_D = -0.75; // Spacing 1.5m (0.75 - -0.75)
-// But user wants "2 line machines facing each other".
-// If C is at 0.8 and D is at -0.8, they are facing across 0.
-// Let's redefine Lanes for Collar specifically if needed, OR just adjust constants.
-// Let's make C and D be the two main facing lines.
-// C at 0.8, D at -0.8?
-// Let's try:
+const LANE_Z_D = -0.75;
+
 const LANE_Z_M1 = 1.0;
 const LANE_Z_M2 = -1.0;
-// We'll update logic to use these for C and D if we want them facing across center.
-
-// Reverting to values that make sense for "2 lines":
-// Lane C: z = 0.8
-// Lane D: z = -0.8
-// This centers them around Z=0 with 1.6m gap.
-
 
 const MACHINE_SPACING_X = 1.55;
 const SECTION_GAP_X = 1.5;
@@ -45,12 +34,19 @@ interface LaneCursors {
     D: number;
 }
 
+export interface LayoutResult {
+    layout: MachinePosition[];
+    errors: string[];
+}
+
 export const generateLayout = (
     rawOperations: Operation[],
     targetOutput: number,
-    workingHours: number
-): MachinePosition[] => {
+    workingHours: number,
+    lineNo: string = 'Line 1'
+): LayoutResult => {
     const layout: MachinePosition[] = [];
+    const errors: string[] = [];
     const balancedOps = calculateMachineRequirements(rawOperations, targetOutput, workingHours);
 
     // Group by Section (Order preserved)
@@ -705,7 +701,73 @@ export const generateLayout = (
         }
     }
 
-    return layout;
+    // --- VALIDATION LOGIC ---
+    // Iterate over processed sections to check dimensions
+    const processedSections = new Set(layout.map(m => m.section).filter(Boolean) as string[]);
+
+    processedSections.forEach(secName => {
+        const secLower = secName?.toLowerCase();
+        let dimKey = 'default';
+        if (secLower?.includes('cuff')) dimKey = 'cuff';
+        else if (secLower?.includes('sleeve')) dimKey = 'sleeve';
+        else if (secLower?.includes('collar')) dimKey = 'collar';
+        else if (secLower?.includes('front')) dimKey = 'front';
+        else if (secLower?.includes('back')) dimKey = 'back';
+        else if (secLower?.includes('assembly')) dimKey = 'assembly';
+        else return;
+
+        // Get Section Limits
+        let lineKey = 'DEFAULT';
+        if (lineNo.toUpperCase().includes('LINE 6')) lineKey = 'LINE 6';
+
+        // @ts-ignore
+        const secDim = SECTION_DIMENSIONS[lineKey]?.[dimKey] || SECTION_DIMENSIONS['DEFAULT']?.[dimKey];
+
+        if (!secDim) return;
+
+        // Calculate Actual Usage
+        const machinesInSection = layout.filter(m => m.section === secName);
+        if (machinesInSection.length === 0) return;
+
+        // Calculate Bounding Box of Machines in this section
+        const xPositions = machinesInSection.map(m => m.position.x);
+
+        // Machine dimensions add to the bounds
+        // We need to account for machine size at the extremes
+        let minX = Math.min(...xPositions);
+        let maxX = Math.max(...xPositions);
+
+        // Accurate length calculation:
+        // Find machine at minX and maxX and add their half-lengths? 
+        // Or simplified: minX is center, maxX is center.
+        // Total Length = (maxX - minX) + (MachineLength / 2 * 2)?
+        // Let's iterate to find exact physical bounds.
+
+        let absoluteMinX = Infinity;
+        let absoluteMaxX = -Infinity;
+
+        machinesInSection.forEach(m => {
+            const mDim = getMachineDimensions(m.operation.machine_type);
+            // Assuming rotation 0 or 180 means Length is along X
+            // Rotation 90 or 270 means Width is along X
+            const isRotated = Math.abs(Math.abs(m.rotation.y) - Math.PI / 2) < 0.1;
+            const xSize = isRotated ? mDim.width : mDim.length;
+
+            absoluteMinX = Math.min(absoluteMinX, m.position.x - xSize / 2);
+            absoluteMaxX = Math.max(absoluteMaxX, m.position.x + xSize / 2);
+        });
+
+        const actualLength = absoluteMaxX - absoluteMinX;
+
+        // Validation Check
+        // Allow defined tolerance? User said "alert... if exceed".
+        if (actualLength > secDim.length) {
+            const exceedBy = (actualLength - secDim.length).toFixed(2);
+            errors.push(`Section '${secName}' exceeds length limit! Used: ${actualLength.toFixed(2)}m, Max: ${secDim.length.toFixed(2)}m (Overflow: ${exceedBy}m)`);
+        }
+    });
+
+    return { layout, errors };
 };
 
 
