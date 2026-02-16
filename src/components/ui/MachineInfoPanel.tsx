@@ -16,7 +16,7 @@ const MACHINE_BADGE_COLORS: Record<string, string> = {
 };
 
 export const MachineInfoPanel = () => {
-  const { selectedMachine, setSelectedMachine } = useLineStore();
+  const { selectedMachine, setSelectedMachine, operations } = useLineStore();
 
   // ✅ SAFETY: Prevent crash
   if (!selectedMachine) return null;
@@ -64,17 +64,15 @@ export const MachineInfoPanel = () => {
         {/* Content */}
         <div className="p-4 space-y-4">
 
-          {/* Operation Name */}
-          {operation.op_name && (
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-              <label className="text-xs text-muted-foreground uppercase tracking-wide">
-                Operation Name
-              </label>
-              <p className="text-foreground font-medium mt-1">
-                {operation.op_name}
-              </p>
-            </motion.div>
-          )}
+          {/* Operation Description */}
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+            <label className="text-xs text-muted-foreground uppercase tracking-wide">
+              Operation Description
+            </label>
+            <p className="text-foreground font-medium mt-1">
+              {operation.op_name || "N/A"}
+            </p>
+          </motion.div>
 
           {/* Machine Type */}
           <div className="flex items-center gap-3">
@@ -122,11 +120,36 @@ export const MachineInfoPanel = () => {
               </p>
             </div>
           </div>
+
+          {/* New: Section Statistics */}
+          <div className="p-3 bg-primary/5 rounded-lg border border-primary/10 mt-2 space-y-2">
+            <h4 className="text-xs font-bold text-primary uppercase tracking-wide">
+              {operation.section || "Section"} Statistics
+            </h4>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <span className="text-xs text-muted-foreground block">Section Ops</span>
+                <span className="text-sm font-bold text-foreground">
+                  {operations.filter(op => (op.section || "").toLowerCase() === (operation.section || "").toLowerCase()).length} Machines
+                </span>
+              </div>
+              <div>
+                <span className="text-xs text-muted-foreground block">Section Total SMV</span>
+                <span className="text-sm font-bold text-foreground">
+                  {operations
+                    .filter(op => (op.section || "").toLowerCase() === (operation.section || "").toLowerCase())
+                    .reduce((sum, op) => sum + (op.smv || 0), 0)
+                    .toFixed(2)} min
+                </span>
+              </div>
+            </div>
+          </div>
+
         </div>
 
         {/* Footer */}
         <div className="h-1 bg-gradient-to-r from-primary via-accent to-primary opacity-50" />
       </motion.div>
-    </AnimatePresence>
+    </AnimatePresence >
   );
 };

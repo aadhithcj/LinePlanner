@@ -19,7 +19,7 @@ export const Ground = () => {
     <group>
       {/* Ground plane */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow>
-        <planeGeometry args={[500, 500]} />
+        <planeGeometry args={[2000, 2000]} />
         <meshStandardMaterial
           color="#1e293b"
           roughness={0.9}
@@ -30,7 +30,7 @@ export const Ground = () => {
       {/* Grid helper */}
       <gridHelper
         ref={gridRef}
-        args={[500, 250, '#3b82f6', '#334155']}
+        args={[2000, 1000, '#3b82f6', '#334155']}
         position={[0, 0.01, 0]}
       />
     </group>

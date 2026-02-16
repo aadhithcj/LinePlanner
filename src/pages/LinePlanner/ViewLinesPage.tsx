@@ -12,18 +12,18 @@ const LinePlannerPage = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const { 
-    currentLine, 
-    machineLayout, 
+  const {
+    currentLine,
+    machineLayout,
     operations,
-    saveLine, 
+    saveLine,
     setSelectedMachine
   } = useLineStore();
-  
+
   // Redirect if no line is loaded
   useEffect(() => {
     const timeout = setTimeout(() => {
-      if (!currentLine && machineLayout.length === 0) {
+      if (!currentLine && (machineLayout?.length || 0) === 0) {
         navigate('/');
       }
     }, 300);
@@ -40,7 +40,7 @@ const LinePlannerPage = () => {
       });
     }
   };
-  
+
   const handleReset = () => {
     setSelectedMachine(null);
     toast({
@@ -48,11 +48,11 @@ const LinePlannerPage = () => {
       description: "Machine selection has been reset",
     });
   };
-  
+
   const totalSMV = operations.reduce((sum, op) => sum + op.smv, 0);
   const uniqueSections = new Set(operations.map(o => o.section).filter(Boolean)).size;
   const uniqueMachines = new Set(operations.map(o => o.machine_type).filter(Boolean)).size;
-  
+
   return (
     <div className="h-screen flex flex-col bg-background overflow-hidden">
       {/* Header */}
@@ -70,7 +70,7 @@ const LinePlannerPage = () => {
           >
             <ArrowLeft className="w-5 h-5" />
           </Button>
-          
+
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-primary/10">
               <Factory className="w-5 h-5 text-primary" />
@@ -85,7 +85,7 @@ const LinePlannerPage = () => {
             </div>
           </div>
         </div>
-        
+
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={handleReset}>
             <RotateCcw className="w-4 h-4 mr-2" />
@@ -97,7 +97,7 @@ const LinePlannerPage = () => {
           </Button>
         </div>
       </motion.header>
-      
+
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
         {/* Stats Sidebar */}
@@ -110,7 +110,7 @@ const LinePlannerPage = () => {
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-4">
             Line Statistics
           </h2>
-          
+
           <div className="space-y-4">
             <motion.div whileHover={{ scale: 1.02 }} className="p-4 rounded-xl bg-secondary/50 border border-border/50">
               <div className="flex items-center gap-3">
@@ -123,7 +123,7 @@ const LinePlannerPage = () => {
                 </div>
               </div>
             </motion.div>
-            
+
             <motion.div whileHover={{ scale: 1.02 }} className="p-4 rounded-xl bg-secondary/50 border border-border/50">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-accent/10">
@@ -135,7 +135,7 @@ const LinePlannerPage = () => {
                 </div>
               </div>
             </motion.div>
-            
+
             <motion.div whileHover={{ scale: 1.02 }} className="p-4 rounded-xl bg-secondary/50 border border-border/50">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-industrial-accent/10">
@@ -147,7 +147,7 @@ const LinePlannerPage = () => {
                 </div>
               </div>
             </motion.div>
-            
+
             <motion.div whileHover={{ scale: 1.02 }} className="p-4 rounded-xl bg-secondary/50 border border-border/50">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-secondary">
@@ -193,22 +193,30 @@ const LinePlannerPage = () => {
           {/* Instructions */}
           <div className="mt-8 p-3 rounded-lg bg-primary/5 border border-primary/20">
             <p className="text-xs text-muted-foreground">
-              <strong className="text-foreground">Tip:</strong> Click on any machine to see its details. 
+              <strong className="text-foreground">Tip:</strong> Click on any machine to see its details.
               Use mouse to orbit, scroll to zoom.
             </p>
           </div>
         </motion.aside>
-        
+
         {/* 3D Scene */}
         <div className="flex-1 relative">
-          <Scene3D />
-          <MachineInfoPanel />
+          {(machineLayout?.length || 0) > 0 ? (
+            <>
+              <Scene3D />
+              <MachineInfoPanel />
+            </>
+          ) : (
+            <div className="flex items-center justify-center h-full">
+              <p className="text-muted-foreground">Loading...</p>
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 };
 
-export default LinePlannerPage; 
+export default LinePlannerPage;
 
 

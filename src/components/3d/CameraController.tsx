@@ -32,7 +32,7 @@ export const CameraController = ({ machineLayout, selectedMachine }: CameraContr
       rotateSpeed={1.0}
       panSpeed={1.5}
       minDistance={0.5}
-      maxDistance={100}
+      maxDistance={3000}
       screenSpacePanning={false}
       maxPolarAngle={Math.PI / 2.2}
     />

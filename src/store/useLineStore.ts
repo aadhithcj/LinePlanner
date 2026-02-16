@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import type { LineData, Operation, MachinePosition } from "@/types";
 import { generateLayout } from "@/utils/layoutGenerator";
 
@@ -37,7 +38,7 @@ interface LineStore {
   setVisibleSection: (section: string | null) => void;
 }
 
-export const useLineStore = create<LineStore>((set, get) => ({
+export const useLineStore = create<LineStore>()(persist((set, get) => ({
 
   savedLines: [],
   currentLine: null,
@@ -139,6 +140,18 @@ export const useLineStore = create<LineStore>((set, get) => ({
       savedLines: state.savedLines.filter((l) => l.id !== id),
     })),
 
+  // ... method implementations ...
+
   setSelectedMachine: (machine) => set({ selectedMachine: machine }),
+}), {
+  name: 'line-planner-storage', // unique name
+  partialize: (state) => ({
+    savedLines: state.savedLines,
+    currentLine: state.currentLine,
+    machineLayout: state.machineLayout,
+    operations: state.operations,
+    targetOutput: state.targetOutput,
+    workingHours: state.workingHours
+  }),
 }));
 

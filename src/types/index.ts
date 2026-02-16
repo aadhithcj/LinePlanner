@@ -40,6 +40,7 @@ export interface MachinePosition {
   isTrolley?: boolean;
   isInspection?: boolean;
   section?: string;
+  centerModel?: boolean;
   machineIndex?: number; // 0 for first machine of this op, 1 for second, etc.
 }
 

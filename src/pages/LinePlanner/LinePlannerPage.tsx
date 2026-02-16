@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Save, RotateCcw, Factory, Clock, Layers, Settings, Filter, Eye } from 'lucide-react';
@@ -11,28 +11,43 @@ import { MachineInfoPanel } from '@/components/ui/MachineInfoPanel';
 import { useLineStore } from '@/store/useLineStore';
 import { useToast } from '@/hooks/use-toast';
 
+// Removed unused imports: Canvas, OrbitControls, Text, Environment, useGLTF, collection, query, onSnapshot, db, styled, THREE, Machine3D (if not used directly)
+
 const LinePlannerPage = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  // Removed racks state
 
   const {
     currentLine,
     machineLayout,
     operations,
     saveLine,
-    setSelectedMachine
+    setSelectedMachine,
+    generateMachineLayout
   } = useLineStore();
+
+  // Force layout regeneration on mount to apply any recent code changes
+  useEffect(() => {
+    if (operations.length > 0) {
+      generateMachineLayout(operations);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Redirect if no line is loaded
   useEffect(() => {
     const timeout = setTimeout(() => {
-      if (!currentLine && machineLayout.length === 0) {
+      if (!currentLine && (machineLayout?.length || 0) === 0) {
         navigate('/');
       }
     }, 300);
 
     return () => clearTimeout(timeout);
   }, [currentLine, machineLayout, navigate]);
+
+  // Removed Firebase listener
+
 
   const handleSave = () => {
     if (currentLine) {
@@ -228,6 +243,35 @@ const LinePlannerPage = () => {
             </motion.div>
           </div>
 
+          {/* Debug: List Sections & Machines */}
+          <div className="mt-8 p-3 rounded-lg bg-red-900/20 border border-red-500/30 space-y-3">
+
+            <div>
+              <p className="text-xs font-bold text-red-400 mb-1">DEBUG: Detected Sections</p>
+              <div className="flex flex-wrap gap-1">
+                {Array.from(new Set(operations.map(o => o.section))).map(s => (
+                  <span key={s} className="text-xs bg-red-500/20 text-red-300 px-1 py-0.5 rounded">
+                    "{s}"
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-bold text-red-400 mb-1">DEBUG: Collar Machines</p>
+              <div className="flex flex-col gap-1 max-h-96 overflow-y-auto">
+                {(machineLayout || [])
+                  .filter(m => m.section?.toLowerCase().includes('collar'))
+                  .map((m, i) => (
+                    <span key={m.id} className="text-xs text-red-300">
+                      {i + 1}. {m.operation.machine_type} ({m.lane === 'C' ? 'Left' : 'Right'})
+                    </span>
+                  ))}
+              </div>
+            </div>
+
+          </div>
+
           {/* ✅ Machine Types Legend (restored) */}
           <div className="mt-8">
             <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
@@ -268,34 +312,42 @@ const LinePlannerPage = () => {
 
         {/* 3D Scene */}
         <div className="flex-1 relative bg-black/10">
-          <Scene3D />
-          <MachineInfoPanel />
+          {(machineLayout?.length || 0) > 0 ? (
+            <>
+              <Scene3D />
+              <MachineInfoPanel />
 
-          {/* Controls Help Overlay */}
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 1 }}
-            className="absolute bottom-6 right-6 z-10 bg-card/80 backdrop-blur-md border border-border/50 p-4 rounded-xl shadow-lg pointer-events-none select-none"
-          >
-            <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-2">
-              <Settings className="w-3 h-3" /> Navigation
-            </h3>
-            <ul className="space-y-1.5 text-sm text-foreground/90">
-              <li className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-primary/70" />
-                Right Click + Drag to <b>Pan</b>
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-primary/70" />
-                Left Click + Drag to <b>Rotate</b>
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-primary/70" />
-                Scroll to <b>Zoom</b> at cursor
-              </li>
-            </ul>
-          </motion.div>
+              {/* Controls Help Overlay */}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 1 }}
+                className="absolute bottom-6 right-6 z-10 bg-card/80 backdrop-blur-md border border-border/50 p-4 rounded-xl shadow-lg pointer-events-none select-none"
+              >
+                <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-2">
+                  <Settings className="w-3 h-3" />Navigation
+                </h3>
+                <ul className="space-y-1.5 text-sm text-foreground/90">
+                  <li className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary/70" />
+                    Right Click + Drag to <b>Pan</b>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary/70" />
+                    Left Click + Drag to <b>Rotate</b>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary/70" />
+                    Scroll to <b>Zoom</b> at cursor
+                  </li>
+                </ul>
+              </motion.div>
+            </>
+          ) : (
+            <div className="flex items-center justify-center h-full">
+              <p className="text-muted-foreground">Loading...</p>
+            </div>
+          )}
         </div>
       </div>
     </div>
