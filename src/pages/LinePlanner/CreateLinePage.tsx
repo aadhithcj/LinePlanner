@@ -35,7 +35,8 @@ const CreateLinePage = () => {
 
   // Load backend lines
   useEffect(() => {
-    fetch("http://localhost:4000/lines")
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+    fetch(`${apiUrl}/lines`)
       .then(res => res.json())
       .then(data => {
         const merged = Array.from(new Set([...DEFAULT_LINES, ...data]));
@@ -47,7 +48,8 @@ const CreateLinePage = () => {
   // Load styles for selected line
   const loadStyles = (line: string) => {
     if (!line) return;
-    fetch(`http://localhost:4000/styles?line=${line}`)
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+    fetch(`${apiUrl}/styles?line=${line}`)
       .then(res => res.json())
       .then(data => setStyles(data))
       .catch(() => { });
@@ -56,7 +58,8 @@ const CreateLinePage = () => {
   // Load cones for selected style
   const loadCones = (line: string, style: string) => {
     if (!line || !style) return;
-    fetch(`http://localhost:4000/oc?line=${line}&style=${encodeURIComponent(style)}`)
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+    fetch(`${apiUrl}/oc?line=${line}&style=${encodeURIComponent(style)}`)
       .then(res => res.json())
       .then(data => setCones(data))
       .catch(() => { });

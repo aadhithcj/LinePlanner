@@ -45,6 +45,7 @@ const server = http.createServer((req, res) => {
   res.end(JSON.stringify({ message: "Backend is working" }));
 });
 
-server.listen(4000, () => {
-  console.log("Backend running on http://localhost:4000");
+const PORT = process.env.PORT || 4000;
+server.listen(PORT, () => {
+  console.log(`Backend running on port ${PORT}`);
 });
