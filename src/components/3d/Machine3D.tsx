@@ -1,10 +1,12 @@
 
-import { useRef, useState, useMemo, useLayoutEffect } from 'react';
+import { useRef, useState, useMemo, useLayoutEffect, Suspense } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Text, useGLTF, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import type { MachinePosition } from '@/types';
 import { useLineStore } from '@/store/useLineStore';
+// Import the Error Boundary
+import { ModelErrorBoundary } from './ModelErrorBoundary';
 
 interface Machine3DProps {
   machineData: MachinePosition;
@@ -63,7 +65,12 @@ const MODEL_MAP: Record<string, string> = {
 };
 
 const getModelUrl = (type: string) => {
-  if (!type) return `/models/${MODEL_MAP['default']}`;
+  // Use import.meta.env.BASE_URL to handle sub-paths on hosting
+  const baseUrl = import.meta.env.BASE_URL || '/';
+  // Ensure we don't end up with double slashes if BASE_URL ends with /
+  const prefix = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+
+  if (!type) return `${prefix}models/${MODEL_MAP['default']}`;
 
   const t = type.toLowerCase();
 
@@ -72,13 +79,16 @@ const getModelUrl = (type: string) => {
 
   for (const key of Object.keys(MODEL_MAP)) {
     if (t.includes(key) || cleanType.includes(key)) {
-      return `/models/${MODEL_MAP[key]}`;
+      return `${prefix}models/${MODEL_MAP[key]}`;
     }
   }
-  return `/models/${MODEL_MAP['default']}`;
+  return `${prefix}models/${MODEL_MAP['default']}`;
 };
 
-export const Machine3D = ({ machineData }: Machine3DProps) => {
+// ----------------------------------------------------------------------
+// Inner Component: Handles Model Loading & Logic
+// ----------------------------------------------------------------------
+const Machine3DContent = ({ machineData }: Machine3DProps) => {
   const meshRef = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
   const [clicked, setClicked] = useState(false);
@@ -86,88 +96,17 @@ export const Machine3D = ({ machineData }: Machine3DProps) => {
   const { selectedMachine, setSelectedMachine, visibleSection } = useLineStore();
   const isSelected = selectedMachine?.id === machineData.id;
 
-  // Visibility Logic
-  const isVisible = !visibleSection || (machineData.section && machineData.section.toLowerCase() === visibleSection.toLowerCase());
-
-  // Check if this is a Section Board
-  if (machineData.operation.machine_type.toLowerCase().startsWith('board')) {
-
-    if (!isVisible) return null;
-    return (
-      <group
-        position={[machineData.position.x, machineData.position.y, machineData.position.z]}
-        rotation={[machineData.rotation.x, machineData.rotation.y, machineData.rotation.z]}
-      >
-        <mesh position={[0, -1.2, 0]}>
-          <cylinderGeometry args={[0.05, 0.05, 2.5]} />
-          <meshStandardMaterial color="#333" />
-        </mesh>
-        <mesh position={[0, 0, 0]}>
-          <boxGeometry args={[1.5, 0.5, 0.1]} />
-          <meshStandardMaterial color="#ffffff" />
-        </mesh>
-        <Text
-          position={[0, 0, 0.06]}
-          fontSize={0.2}
-          color="#000000"
-          anchorX="center"
-          anchorY="middle"
-        >
-          {machineData.section}
-        </Text>
-      </group>
-    );
-  }
-
-  // Check if this is a Pathway
-  if (machineData.operation.machine_type.toLowerCase() === 'pathway') {
-    if (!isVisible) return null;
-    return (
-      <group
-        position={[machineData.position.x, 0.01, 0]} // Centered on Z=0, slightly above floor
-        rotation={[0, 0, 0]}
-      >
-        {/* Walkway Strip: 2m wide along X, 15m long along Z */}
-        <mesh position={[0, 0, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <planeGeometry args={[2, 30]} />
-          <meshStandardMaterial color="#666666" transparent opacity={0.4} />
-        </mesh>
-        {/* Borders */}
-        <mesh position={[1, 0, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <planeGeometry args={[0.1, 30]} />
-          <meshStandardMaterial color="#fbbf24" />
-        </mesh>
-        <mesh position={[-1, 0, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <planeGeometry args={[0.1, 30]} />
-          <meshStandardMaterial color="#fbbf24" />
-        </mesh>
-      </group>
-    );
-  }
-
   const modelUrl = getModelUrl(machineData.operation.machine_type);
 
   // Handle Blank Space (Notch M/C)
   if (modelUrl === 'empty') return null;
 
-  // Load model with error handling
-  let scene;
-  try {
-    const gltf = useGLTF(modelUrl, true);
-    scene = gltf.scene;
-  } catch (error) {
-    console.error(`Failed to load model: ${modelUrl}`, error);
-    // Return a simple box as fallback
-    return (
-      <mesh
-        position={[machineData.position.x, machineData.position.y, machineData.position.z]}
-        rotation={[machineData.rotation.x, machineData.rotation.y, machineData.rotation.z]}
-      >
-        <boxGeometry args={[0.5, 0.5, 0.5]} />
-        <meshStandardMaterial color="#ff0000" />
-      </mesh>
-    );
-  }
+  // -----------------------------------------------------------
+  // CRITICAL FIX: Removed try/catch around useGLTF
+  // useGLTF relies on Suspense (throwing a Promise).
+  // Catching it breaks the loading mechanism.
+  // -----------------------------------------------------------
+  const { scene } = useGLTF(modelUrl, true);
 
   // Clone scene with memoization to prevent re-cloning every render
   const clonedScene = useMemo(() => scene ? scene.clone() : null, [scene]);
@@ -202,18 +141,9 @@ export const Machine3D = ({ machineData }: Machine3DProps) => {
         console.log(`📏 [${machineData.operation.machine_type}] L:${l}' W:${w}' H:${h}'`);
       }
     }
-  }, [clonedScene, machineData.centerModel]);
+  }, [clonedScene, machineData.centerModel, machineData.operation.machine_type]);
 
   // Dynamic Scaling
-  // Many industrial models are in MM or CM. ThreeJS is Meters.
-  // If the model is huge, let's scale it down. 
-  // A safe bet for these specific models (often raw exports) is 0.01 or 0.1.
-  // User screenshot showed massive gray walls -> implies scale is like 100x or 1000x too big.
-  // Let's try 0.1 first. If it's usually 1 unit = 1mm, then 0.001 is needed.
-  // But let's start with 0.1 and we can adjust.
-  // UPDATE: User says "set some other machine as default".
-  // Note: We use 'last machine.glb' as default.
-
   const SCALE_FACTOR = 0.01; // Base scale for mm -> m
 
   // Model-specific scale overrides
@@ -231,19 +161,22 @@ export const Machine3D = ({ machineData }: Machine3DProps) => {
     return SCALE_FACTOR * specificScale;
   };
 
-  // Color override for selection/hover? 
-  // With GLBs, it's harder to tint the whole model without traversing materials.
-  // We will simply use an outline or indicator for selection.
-
   useFrame((state, delta) => {
     if (!meshRef.current) return;
+
+    // OPTIMIZATION: Only animate scale/position if interacting
+    // This reduces frame overhead when idle
+    const isInteracting = clicked || hovered || isSelected;
+
+    if (!isInteracting && meshRef.current.scale.x === getBaseScale()) return;
 
     // Scale animation
     const clickScale = clicked ? 0.9 : 1;
     const baseScale = getBaseScale();
     const finalScale = baseScale * clickScale;
 
-    meshRef.current.scale.set(finalScale, finalScale, finalScale);
+    // Smoothly interpolate scale
+    meshRef.current.scale.lerp(new THREE.Vector3(finalScale, finalScale, finalScale), delta * 10);
 
     // Hover effect
     const hoverY = hovered ? 0.1 : 0;
@@ -259,8 +192,6 @@ export const Machine3D = ({ machineData }: Machine3DProps) => {
     setTimeout(() => setClicked(false), 150);
     setSelectedMachine(isSelected ? null : machineData);
   };
-
-  if (!isVisible) return null;
 
   return (
     <group
@@ -309,3 +240,93 @@ export const Machine3D = ({ machineData }: Machine3DProps) => {
     </group>
   );
 };
+
+// ----------------------------------------------------------------------
+// Main Wrapper: Handles Error Boundaries & Fallbacks
+// ----------------------------------------------------------------------
+export const Machine3D = ({ machineData }: Machine3DProps) => {
+  const { visibleSection } = useLineStore();
+
+  // Visibility Logic
+  const isVisible = !visibleSection || (machineData.section && machineData.section.toLowerCase() === visibleSection.toLowerCase());
+
+  // Check if this is a Section Board (Simple geometry, no external model)
+  if (machineData.operation.machine_type.toLowerCase().startsWith('board')) {
+    if (!isVisible) return null;
+    return (
+      <group
+        position={[machineData.position.x, machineData.position.y, machineData.position.z]}
+        rotation={[machineData.rotation.x, machineData.rotation.y, machineData.rotation.z]}
+      >
+        <mesh position={[0, -1.2, 0]}>
+          <cylinderGeometry args={[0.05, 0.05, 2.5]} />
+          <meshStandardMaterial color="#333" />
+        </mesh>
+        <mesh position={[0, 0, 0]}>
+          <boxGeometry args={[1.5, 0.5, 0.1]} />
+          <meshStandardMaterial color="#ffffff" />
+        </mesh>
+        <Text
+          position={[0, 0, 0.06]}
+          fontSize={0.2}
+          color="#000000"
+          anchorX="center"
+          anchorY="middle"
+        >
+          {machineData.section}
+        </Text>
+      </group>
+    );
+  }
+
+  // Check if this is a Pathway (Simple geometry)
+  if (machineData.operation.machine_type.toLowerCase() === 'pathway') {
+    if (!isVisible) return null;
+    return (
+      <group
+        position={[machineData.position.x, 0.01, 0]} // Centered on Z=0, slightly above floor
+        rotation={[0, 0, 0]}
+      >
+        {/* Walkway Strip: 2m wide along X, 15m long along Z */}
+        <mesh position={[0, 0, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[2, 30]} />
+          <meshStandardMaterial color="#666666" transparent opacity={0.4} />
+        </mesh>
+        {/* Borders */}
+        <mesh position={[1, 0, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[0.1, 30]} />
+          <meshStandardMaterial color="#fbbf24" />
+        </mesh>
+        <mesh position={[-1, 0, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[0.1, 30]} />
+          <meshStandardMaterial color="#fbbf24" />
+        </mesh>
+      </group>
+    );
+  }
+
+  if (!isVisible) return null;
+
+  // Render Machine with Error Boundary and Suspense
+  return (
+    <ModelErrorBoundary
+      machineName={machineData.operation.machine_type}
+      fallback={
+        <group
+          position={[machineData.position.x, machineData.position.y, machineData.position.z]}
+          rotation={[machineData.rotation.x, machineData.rotation.y, machineData.rotation.z]}
+        >
+          <mesh>
+            <boxGeometry args={[0.5, 0.5, 0.5]} />
+            <meshStandardMaterial color="#ff0000" />
+          </mesh>
+        </group>
+      }
+    >
+      <Suspense fallback={null}>
+        <Machine3DContent machineData={machineData} />
+      </Suspense>
+    </ModelErrorBoundary>
+  );
+};
+
