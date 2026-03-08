@@ -8,7 +8,9 @@ export interface Operation {
   machine_type: string;
   smv: number;
   section: string;
-
+  tool_folder?: string;
+  machinist_smv?: number;
+  non_machinist_smv?: number;
 }
 export type ColumnAliases = {
   op_no: string[];
@@ -16,7 +18,11 @@ export type ColumnAliases = {
   machine_type: string[];
   smv: string[];
   section: string[];
+  tool_folder: string[];
+  machinist_smv: string[];
+  non_machinist_smv: string[];
 };
+
 
 
 /**
@@ -42,6 +48,20 @@ export interface MachinePosition {
   section?: string;
   centerModel?: boolean;
   machineIndex?: number; // 0 for first machine of this op, 1 for second, etc.
+  hasManualPosition?: boolean;
+}
+
+export interface SectionLayout {
+  id: string;
+  name: string;
+  width: number;
+  length: number;
+  position: {
+    x: number;
+    y: number;
+    z: number;
+  };
+  color: string;
 }
 
 /**
@@ -56,10 +76,13 @@ export interface LineData {
   updatedAt: string;
   operations: Operation[];
   machineLayout: MachinePosition[];
+  sectionLayout?: SectionLayout[];
   totalSMV: number;
   // ✅ New fields for line balancing
   targetOutput: number;
   workingHours: number;
+  efficiency?: number;
+  sourceSheet?: string;
 }
 
 /**

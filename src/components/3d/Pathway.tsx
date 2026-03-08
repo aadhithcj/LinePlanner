@@ -18,6 +18,8 @@ export const Pathway = ({ position, width, length, label }: PathwayProps) => {
                     roughness={0.8}
                     transparent
                     opacity={0.6}
+                    polygonOffset
+                    polygonOffsetFactor={1}
                 />
             </mesh>
 

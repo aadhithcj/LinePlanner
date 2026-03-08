@@ -43,7 +43,7 @@
     --industrial-accent: 45 93% 47%;
     --industrial-success: 160 60% 45%;
     --industrial-glow: 220 70% 50%;
-    
+
     /* Machine colors */
     --machine-snls: 200 70% 50%;
     --machine-snec: 280 60% 55%;
@@ -137,11 +137,11 @@
 
   .industrial-glow {
     box-shadow: 0 0 40px hsl(var(--industrial-glow) / 0.15),
-                0 0 80px hsl(var(--industrial-glow) / 0.1);
+      0 0 80px hsl(var(--industrial-glow) / 0.1);
   }
 
   .grid-background {
-    background-image: 
+    background-image:
       linear-gradient(hsl(var(--border) / 0.5) 1px, transparent 1px),
       linear-gradient(90deg, hsl(var(--border) / 0.5) 1px, transparent 1px);
     background-size: 50px 50px;
@@ -158,9 +158,12 @@
   }
 
   @keyframes float {
-    0%, 100% {
+
+    0%,
+    100% {
       transform: translateY(0);
     }
+
     50% {
       transform: translateY(-10px);
     }
@@ -171,9 +174,12 @@
   }
 
   @keyframes pulse-glow {
-    0%, 100% {
+
+    0%,
+    100% {
       box-shadow: 0 0 20px hsl(var(--primary) / 0.3);
     }
+
     50% {
       box-shadow: 0 0 40px hsl(var(--primary) / 0.5);
     }

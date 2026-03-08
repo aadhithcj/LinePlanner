@@ -77,7 +77,7 @@ const LinePlannerPage = () => {
             </div>
             <div>
               <h1 className="text-lg font-bold text-foreground">
-                {currentLine ? ` ${currentLine.lineNo}` : '3D Line Planner'}
+                {currentLine ? ` ${currentLine.lineNo}` : 'Factory Twin'}
               </h1>
               {currentLine?.styleNo && (
                 <p className="text-xs text-muted-foreground">{currentLine.styleNo}</p>

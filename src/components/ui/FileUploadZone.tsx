@@ -13,48 +13,50 @@ interface FileUploadZoneProps {
 /**
  * Animated drag-and-drop file upload zone
  */
-export const FileUploadZone = ({ 
-  onFileSelect, 
-  isLoading = false, 
+export const FileUploadZone = ({
+  onFileSelect,
+  isLoading = false,
   error = null,
-  success = false 
+  success = false
 }: FileUploadZoneProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
-  
+
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(true);
   }, []);
-  
+
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
   }, []);
-  
+
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    
+
     const file = e.dataTransfer.files[0];
     if (file && (file.name.endsWith('.xlsx') || file.name.endsWith('.xls'))) {
       setFileName(file.name);
       onFileSelect(file);
     }
   }, [onFileSelect]);
-  
+
   const handleFileInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       setFileName(file.name);
       onFileSelect(file);
+      // Reset value so the same file can be uploaded again if needed
+      e.target.value = '';
     }
   }, [onFileSelect]);
-  
+
   const resetUpload = useCallback(() => {
     setFileName(null);
   }, []);
-  
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -84,7 +86,7 @@ export const FileUploadZone = ({
           className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
           disabled={isLoading}
         />
-        
+
         {/* Background animation */}
         <motion.div
           className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-accent/5"
@@ -93,7 +95,7 @@ export const FileUploadZone = ({
           }}
           transition={{ duration: 0.3 }}
         />
-        
+
         <AnimatePresence mode="wait">
           {isLoading ? (
             <motion.div
@@ -184,7 +186,7 @@ export const FileUploadZone = ({
                   <FileSpreadsheet className="w-8 h-8 text-muted-foreground group-hover:text-primary transition-colors" />
                 )}
               </motion.div>
-              
+
               <div className="text-center">
                 <p className="font-medium text-foreground">
                   {isDragging ? "Drop your file here" : "Upload OB Excel Sheet"}

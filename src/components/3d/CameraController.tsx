@@ -7,25 +7,21 @@ import type { MachinePosition } from '@/types';
 interface CameraControllerProps {
   machineLayout: MachinePosition[];
   selectedMachine: MachinePosition | null;
+  target?: [number, number, number];
 }
 
 /**
  * Camera controller with MapControls for RTS-style navigation
  */
-export const CameraController = ({ machineLayout, selectedMachine }: CameraControllerProps) => {
+export const CameraController = ({ machineLayout, selectedMachine, target = [0, 0, 0] }: CameraControllerProps) => {
   const { camera } = useThree();
   const controlsRef = useRef<any>(null);
-
-  // Move camera on selection change (optional)
-  useEffect(() => {
-    // Optional: If you want to snap to selection, implement here.
-    // For MapControls, we usually let the user pan freely.
-  }, [selectedMachine]);
 
   return (
     <MapControls
       ref={controlsRef}
       makeDefault
+      target={new THREE.Vector3(...target)}
       enableDamping
       dampingFactor={0.1}
       zoomSpeed={0.5}

@@ -10,7 +10,7 @@ import { useLineStore } from '@/store/useLineStore';
 const PlanHomePage = () => {
   const navigate = useNavigate();
   const { savedLines } = useLineStore();
-  
+
   const containerVariants = {
     hidden: { opacity: 0 },
     visible: {
@@ -21,7 +21,7 @@ const PlanHomePage = () => {
       },
     },
   };
-  
+
   const itemVariants = {
     hidden: { opacity: 0, y: 40 },
     visible: {
@@ -34,13 +34,13 @@ const PlanHomePage = () => {
       },
     },
   };
-  
+
   return (
     <div className="min-h-screen relative overflow-hidden">
       <AnimatedBackground />
-      
+
       <div className="relative z-10 min-h-screen flex flex-col items-center justify-center p-8">
-        
+
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -30 }}
@@ -58,15 +58,15 @@ const PlanHomePage = () => {
               <Factory className="w-10 h-10 text-primary-foreground" />
             </div>
           </motion.div>
-          
+
           <h1 className="text-5xl md:text-6xl font-bold mb-4">
-            <span className="text-gradient">3D Line Planner</span>
+            <span className="text-gradient">Factory Twin</span>
           </h1>
-          
+
           <p className="text-xl text-muted-foreground max-w-lg mx-auto">
             Visualize and plan your garment production lines with powerful 3D layouts
           </p>
-          
+
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -77,7 +77,7 @@ const PlanHomePage = () => {
             <span>Powered by advanced OB parsing technology</span>
           </motion.div>
         </motion.div>
-        
+
         {/* Navigation Cards */}
         <motion.div
           variants={containerVariants}
@@ -94,27 +94,27 @@ const PlanHomePage = () => {
             className="group cursor-pointer"
           >
             <div className="relative glass-card rounded-2xl p-8 h-64 overflow-hidden">
-              
+
               <motion.div
                 className="absolute inset-0 bg-gradient-to-br from-primary/10 to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500"
               />
-              
+
               <motion.div
                 className="absolute -top-20 -right-20 w-40 h-40 bg-primary/20 rounded-full blur-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"
               />
-              
+
               <div className="relative z-10 h-full flex flex-col">
                 <div className="p-4 rounded-xl bg-primary/10 w-fit group-hover:bg-primary/20 transition-colors">
                   <Plus className="w-8 h-8 text-primary" />
                 </div>
-                
+
                 <div className="mt-auto">
                   <h2 className="text-2xl font-bold text-foreground mb-2">Create New Line</h2>
                   <p className="text-muted-foreground">
                     Upload an OB sheet and generate a 3D sewing line layout
                   </p>
                 </div>
-                
+
                 <motion.div
                   className="absolute bottom-8 right-8 opacity-0 group-hover:opacity-100 transition-opacity"
                   animate={{ x: [0, 5, 0] }}
@@ -127,7 +127,7 @@ const PlanHomePage = () => {
               </div>
             </div>
           </motion.div>
-          
+
           {/* View Saved Lines Card */}
           <motion.div
             variants={itemVariants}
@@ -137,21 +137,21 @@ const PlanHomePage = () => {
             className="group cursor-pointer"
           >
             <div className="relative glass-card rounded-2xl p-8 h-64 overflow-hidden">
-              
+
               <motion.div
                 className="absolute inset-0 bg-gradient-to-br from-accent/10 to-accent/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500"
               />
-              
+
               <motion.div
                 className="absolute -top-20 -right-20 w-40 h-40 bg-accent/20 rounded-full blur-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"
               />
-              
+
               <div className="relative z-10 h-full flex flex-col">
                 <div className="flex items-center gap-3">
                   <div className="p-4 rounded-xl bg-accent/10 w-fit group-hover:bg-accent/20 transition-colors">
                     <FolderOpen className="w-8 h-8 text-accent" />
                   </div>
-                  
+
                   {savedLines.length > 0 && (
                     <motion.span
                       initial={{ scale: 0 }}
@@ -162,14 +162,14 @@ const PlanHomePage = () => {
                     </motion.span>
                   )}
                 </div>
-                
+
                 <div className="mt-auto">
                   <h2 className="text-2xl font-bold text-foreground mb-2">View Saved Lines</h2>
                   <p className="text-muted-foreground">
                     Browse and manage your previously created line layouts
                   </p>
                 </div>
-                
+
                 <motion.div
                   className="absolute bottom-8 right-8 opacity-0 group-hover:opacity-100 transition-opacity"
                   animate={{ x: [0, 5, 0] }}
@@ -183,7 +183,7 @@ const PlanHomePage = () => {
             </div>
           </motion.div>
         </motion.div>
-        
+
         {/* Footer */}
         <motion.p
           initial={{ opacity: 0 }}
@@ -191,7 +191,7 @@ const PlanHomePage = () => {
           transition={{ delay: 1.2 }}
           className="mt-16 text-sm text-muted-foreground"
         >
-          Industrial Production Planning Tool • v1.0
+          Factory Twin • v1.0
         </motion.p>
       </div>
     </div>
