@@ -352,7 +352,7 @@ export const generateLayout = (
     const sectionSpaceViolators: string[] = [];
 
     const sectionTails: Record<string, { lTail: number, rTail: number }> = {};
-    const spillPending: Record<string, { ops: any[], isNext: boolean, sourceSection?: string }> = {};
+    const spillPending: Record<string, { ops: any[], isNext: boolean, sourceSection?: string }[]> = {};
     const isSpilledForward: Record<string, boolean> = {};
 
     // --- PHASE 1: PRE-CALCULATE SPILLS ---
@@ -387,76 +387,87 @@ export const generateLayout = (
         if (matchedTag && !secLower.includes('assembly')) {
             const spaceInfo = sectionSpace[matchedTag];
             if (spaceInfo.usedLen > spaceInfo.availableLen) {
-                const excess = spaceInfo.usedLen - spaceInfo.availableLen;
-                const overflowTarget = findOverflowSection(secLower, cursors, isAB);
+                let excess = spaceInfo.usedLen - spaceInfo.availableLen;
+                
+                const primaryTarget = findOverflowSection(secLower, cursors, isAB).toLowerCase();
+                const siblings = isAB ? ['cuff', 'sleeve', 'back'] : ['collar', 'front'];
+                const orderedSiblings = [primaryTarget, ...siblings.filter(s => s !== primaryTarget && s !== secLower)];
+                
+                let distributed = false;
 
-                if (overflowTarget.toLowerCase() !== secLower && !overflowTarget.toLowerCase().includes('assembly')) {
-                    const targetTag = PARTS_ORDER.find(t => overflowTarget.toLowerCase().includes(t));
+                for (const potentialTarget of orderedSiblings) {
+                    if (excess <= 0) break;
+                    if (potentialTarget === secLower || potentialTarget.includes('assembly')) continue;
+                    
+                    const targetTag = PARTS_ORDER.find(t => potentialTarget.includes(t));
                     if (targetTag && sectionSpace[targetTag]) {
                         const targetSpace = sectionSpace[targetTag];
                         const targetAvailableSpace = Math.max(0, targetSpace.availableLen - targetSpace.usedLen);
 
-                        if (targetAvailableSpace >= excess) {
-                            targetSpace.usedLen += excess;
-                            spaceInfo.usedLen -= excess;
-
+                        if (targetAvailableSpace > 0) {
+                            const amountToMove = Math.min(excess, targetAvailableSpace);
+                            targetSpace.usedLen += amountToMove;
+                            spaceInfo.usedLen -= amountToMove;
+                            
                             const targetIdx = PARTS_ORDER.indexOf(targetTag);
                             const sourceIdx = PARTS_ORDER.indexOf(matchedTag);
                             const isNext = targetIdx > sourceIdx;
 
                             const movedOps: any[] = [];
-                            let remainingExcess = excess;
+                            let remainingExcess = amountToMove;
                             while (ops.length > 0 && remainingExcess > 0) {
                                 if (isNext) {
                                     const item = ops[ops.length - 1];
                                     const machineWidth = (getMachineZoneDims(item.operation.machine_type).length);
-                                    const lenContribution = (machineWidth * item.count) / 2.0;
-
                                     let countToMove = 0;
                                     while (countToMove < item.count && (countToMove * (machineWidth / 2.0)) < remainingExcess) {
                                         countToMove++;
                                     }
-
                                     if (countToMove >= item.count) {
                                         movedOps.unshift(ops.pop()!);
-                                        remainingExcess -= lenContribution;
-                                    } else {
+                                        remainingExcess -= (item.count * machineWidth / 2.0);
+                                    } else if (countToMove > 0) {
                                         const splitItem = { ...item, count: countToMove };
                                         item.count -= countToMove;
                                         movedOps.unshift(splitItem);
                                         remainingExcess -= (countToMove * (machineWidth / 2.0));
+                                    } else {
+                                        break;
                                     }
                                 } else {
                                     const item = ops[0];
                                     const machineWidth = (getMachineZoneDims(item.operation.machine_type).length);
-                                    const lenContribution = (machineWidth * item.count) / 2.0;
-
                                     let countToMove = 0;
                                     while (countToMove < item.count && (countToMove * (machineWidth / 2.0)) < remainingExcess) {
                                         countToMove++;
                                     }
-
                                     if (countToMove >= item.count) {
                                         movedOps.push(ops.shift()!);
-                                        remainingExcess -= lenContribution;
-                                    } else {
+                                        remainingExcess -= (item.count * machineWidth / 2.0);
+                                    } else if (countToMove > 0) {
                                         const splitItem = { ...item, count: countToMove };
                                         item.count -= countToMove;
                                         movedOps.push(splitItem);
                                         remainingExcess -= (countToMove * (machineWidth / 2.0));
+                                    } else {
+                                        break;
                                     }
                                 }
                             }
                             if (isNext) isSpilledForward[secName] = true;
-                            spillPending[targetTag] = { ops: movedOps, isNext: isNext, sourceSection: secName };
-                            warnings.unshift(`${secName} ${movedOps.length > 0 ? 'overflow' : 'inspection'} moved to ${overflowTarget}`);
-                        } else {
-                            warnings.unshift(`Space limit exceeded on ${secName}. No space left in ${overflowTarget}.`);
-                            sectionSpaceViolators.push(secName);
+                            if (movedOps.length > 0) {
+                                if (!spillPending[targetTag]) spillPending[targetTag] = [];
+                                spillPending[targetTag].push({ ops: movedOps, isNext: isNext, sourceSection: secName });
+                                warnings.unshift(`${secName} overflow moved to ${potentialTarget.charAt(0).toUpperCase() + potentialTarget.slice(1)}`);
+                                distributed = true;
+                            }
+                            excess -= amountToMove;
                         }
                     }
-                } else if (overflowTarget.toLowerCase() === secLower) {
-                    warnings.unshift(`Space limit exceeded on ${secName}. Section is completely full.`);
+                }
+                
+                if (excess > 0) {
+                    warnings.unshift(`Space limit exceeded on ${secName}. No space left in other sections.`);
                     sectionSpaceViolators.push(secName);
                 }
             }
@@ -560,56 +571,60 @@ export const generateLayout = (
         const lLane = isAB ? 'A' : 'C', rLane = isAB ? 'B' : 'D';
 
         // Special: Handle dynamic backward spill for Front section BEFORE generating Front Main
-        if (matchedTag === 'front' && spillPending['collar'] && !spillPending['collar'].isNext) {
-            const pending = spillPending['collar'];
-            const zoneEnd = PART_BOUNDS['collar'].end;
-            let lane1W = 0, lane2W = 0;
-            let tempAlt = 0;
-            for (const item of pending.ops) {
-                const w = getMachineZoneDims(item.operation.machine_type).length;
-                for (let k = 0; k < item.count; k++) {
-                    if (tempAlt % 2 === 0) lane1W += w;
-                    else lane2W += w;
-                    tempAlt++;
-                }
-            }
-            const maxW = Math.max(lane1W, lane2W);
-
-            // currentTail holds the exact point where the preceding section (Collar)
-            // finished its core layout and inspection.
-            // ALIGN WITH BORDER but NEVER overlap with Collar machines or inspection
-            const startX_O = Math.max(currentTail + 0.05, zoneEnd - maxW);
-
-            let lCX_O = startX_O;
-            let rCX_O = startX_O;
-            let alt_O = 0;
-            const collarZones = ZONES_CD.filter(z => z.start < zoneEnd);
-
-            for (let i = 0; i < pending.ops.length; i++) {
-                const item = pending.ops[i];
-                const dims = getMachineZoneDims(item.operation.machine_type);
-                const w = dims.length;
-                for (let k = 0; k < item.count; k++) {
-                    const targetLane = (alt_O % 2 === 0) ? lLane : rLane;
-                    let nextX = getNextValidX(targetLane === lLane ? lCX_O : rCX_O, w, collarZones);
-                    const minFloor = (currentTail || 0) + 0.5;
-                    nextX = Math.max(nextX, minFloor); // Enforce Supreme Floor
-                    if (targetLane === lLane) {
-                        lCX_O = nextX;
-                        addMachine(item.operation, lLane, lCX_O + w / 2, sectionCounters['Front Overflow']++, undefined, 'Front Overflow', true);
-                        lCX_O += w + MACHINE_SPACING_X;
-                    } else {
-                        rCX_O = nextX;
-                        addMachine(item.operation, rLane, rCX_O + w / 2, sectionCounters['Front Overflow']++, undefined, 'Front Overflow', true);
-                        rCX_O += w + MACHINE_SPACING_X;
+        if (matchedTag === 'front' && spillPending['collar']) {
+            const backwardSpills = spillPending['collar'].filter(p => !p.isNext);
+            if (backwardSpills.length > 0) {
+                for (const pending of backwardSpills) {
+                    const zoneEnd = PART_BOUNDS['collar'].end;
+                    let lane1W = 0, lane2W = 0;
+                    let tempAlt = 0;
+                    for (const item of pending.ops) {
+                        const w = getMachineZoneDims(item.operation.machine_type).length;
+                        for (let k = 0; k < item.count; k++) {
+                            if (tempAlt % 2 === 0) lane1W += w;
+                            else lane2W += w;
+                            tempAlt++;
+                        }
                     }
-                    alt_O++;
-                }
-            }
-            delete spillPending['collar'];
+                    const maxW = Math.max(lane1W, lane2W);
 
-            // Important: Advance alternatingX so exactly when Front Main starts, it naturally sits AFTER Overflow!
-            alternatingX = Math.max(alternatingX, Math.max(lCX_O, rCX_O));
+                    // currentTail holds the exact point where the preceding section (Collar)
+                    // finished its core layout and inspection.
+                    // ALIGN WITH BORDER but NEVER overlap with Collar machines or inspection
+                    const startX_O = Math.max(currentTail + 0.05, zoneEnd - maxW);
+
+                    let lCX_O = startX_O;
+                    let rCX_O = startX_O;
+                    let alt_O = 0;
+                    const collarZones = ZONES_CD.filter(z => z.start < zoneEnd);
+
+                    for (let i = 0; i < pending.ops.length; i++) {
+                        const item = pending.ops[i];
+                        const dims = getMachineZoneDims(item.operation.machine_type);
+                        const w = dims.length;
+                        for (let k = 0; k < item.count; k++) {
+                            const targetLane = (alt_O % 2 === 0) ? lLane : rLane;
+                            let nextX = getNextValidX(targetLane === lLane ? lCX_O : rCX_O, w, collarZones);
+                            const minFloor = (currentTail || 0) + 0.5;
+                            nextX = Math.max(nextX, minFloor); // Enforce Supreme Floor
+                            if (targetLane === lLane) {
+                                lCX_O = nextX;
+                                addMachine(item.operation, lLane, lCX_O + w / 2, sectionCounters['Front Overflow']++, undefined, 'Front Overflow', true);
+                                lCX_O += w + MACHINE_SPACING_X;
+                            } else {
+                                rCX_O = nextX;
+                                addMachine(item.operation, rLane, rCX_O + w / 2, sectionCounters['Front Overflow']++, undefined, 'Front Overflow', true);
+                                rCX_O += w + MACHINE_SPACING_X;
+                            }
+                            alt_O++;
+                        }
+                    }
+                    alternatingX = Math.max(alternatingX, Math.max(lCX_O, rCX_O));
+                }
+                
+                spillPending['collar'] = spillPending['collar'].filter(p => p.isNext);
+                if (spillPending['collar'].length === 0) delete spillPending['collar'];
+            }
         }
 
         lCX = alternatingX; // Reset to the correct start point for Front Main
@@ -668,7 +683,7 @@ export const generateLayout = (
                 position: {
                     x: iStart + iDims.length / 2,
                     y: 0,
-                    z: (isAB_sect ? LANE_Z_A : LANE_Z_C)
+                    z: (isAB_sect ? LANE_Z_CENTER_AB : LANE_Z_CENTER_CD)
                 },
                 rotation: { x: 0, y: ROT_FACE_FRONT, z: 0 },
                 lane: (isAB_sect ? 'A' : 'C'),
@@ -718,12 +733,15 @@ export const generateLayout = (
 
         // 1. If this section is a target for "Next" spillovers (moving forward, e.g. Cuff -> Sleeve)
         // These go to the START of the section.
-        if (matchedTag && spillPending[matchedTag]?.isNext) {
-            const pending = spillPending[matchedTag];
-            const sourceSec = (pending as any).sourceSection || (pending.ops.length > 0 ? pending.ops[0].operation.section : 'Unknown');
-            placeOps(pending.ops, sourceSec);
-            addInspection(sourceSec, cursors, isAB, zones);
-            delete spillPending[matchedTag];
+        if (matchedTag && spillPending[matchedTag]) {
+            const forwardSpills = spillPending[matchedTag].filter(p => p.isNext);
+            for (const pending of forwardSpills) {
+                const sourceSec = pending.sourceSection || (pending.ops.length > 0 ? pending.ops[0].operation.section : 'Unknown');
+                placeOps(pending.ops, sourceSec);
+                addInspection(sourceSec, cursors, isAB, zones);
+            }
+            spillPending[matchedTag] = spillPending[matchedTag].filter(p => !p.isNext);
+            if (spillPending[matchedTag].length === 0) delete spillPending[matchedTag];
         }
 
         // 2. Place current section machines (e.g. Collar machines)
@@ -743,36 +761,39 @@ export const generateLayout = (
 
         // --- PHASE B: PLACE PENDING SPILLOVERS FROM THE END OF THE SECTION ---
         if (matchedTag && spillPending[matchedTag]) {
-            const pending = spillPending[matchedTag];
-            const zoneEnd = PART_BOUNDS[matchedTag].end;
+            const backwardSpills = spillPending[matchedTag].filter(p => !p.isNext);
+            for (const pending of backwardSpills) {
+                const zoneEnd = PART_BOUNDS[matchedTag].end;
 
-            // Calculate exact width needed for alternating placement
-            let lane1W = 0, lane2W = 0;
-            let tempAlt = alt;
-            for (const item of pending.ops) {
-                const w = getMachineZoneDims(item.operation.machine_type).length;
-                for (let k = 0; k < item.count; k++) {
-                    if (tempAlt % 2 === 0) lane1W += w;
-                    else lane2W += w;
-                    tempAlt++;
+                // Calculate exact width needed for alternating placement
+                let lane1W = 0, lane2W = 0;
+                let tempAlt = alt;
+                for (const item of pending.ops) {
+                    const w = getMachineZoneDims(item.operation.machine_type).length;
+                    for (let k = 0; k < item.count; k++) {
+                        if (tempAlt % 2 === 0) lane1W += w;
+                        else lane2W += w;
+                        tempAlt++;
+                    }
                 }
+                const exactPendingWidth = Math.max(lane1W, lane2W);
+                const spillStart = zoneEnd - exactPendingWidth;
+
+                // Align each lane independently so they both finish at the exact zone boundary
+                // We use the last placed inspection's end as the minimum starting point
+                const currentEndX = isAB ? Math.max(cursors.A, cursors.B) : Math.max(cursors.C, cursors.D);
+                lCX = Math.max(currentEndX + 0.05, zoneEnd - lane1W);
+                rCX = Math.max(currentEndX + 0.05, zoneEnd - lane2W);
+
+                const sourceSecLabel = pending.sourceSection || pending.ops[0].operation.section;
+                placeOps(pending.ops, sourceSecLabel);
+
+                if (isAB) { cursors.A = Math.max(cursors.A, lCX); cursors.B = Math.max(cursors.B, rCX); }
+                else { cursors.C = Math.max(cursors.C, lCX); cursors.D = Math.max(cursors.D, rCX); }
             }
-            const exactPendingWidth = Math.max(lane1W, lane2W);
-            const spillStart = zoneEnd - exactPendingWidth;
-
-            // Align each lane independently so they both finish at the exact zone boundary
-            // We use the last placed inspection's end as the minimum starting point
-            const currentEndX = isAB ? Math.max(cursors.A, cursors.B) : Math.max(cursors.C, cursors.D);
-            lCX = Math.max(currentEndX + 0.05, zoneEnd - lane1W);
-            rCX = Math.max(currentEndX + 0.05, zoneEnd - lane2W);
-
-            const sourceSecLabel = pending.ops[0].operation.section;
-            placeOps(pending.ops, sourceSecLabel);
-
-            delete spillPending[matchedTag];
-
-            if (isAB) { cursors.A = Math.max(cursors.A, lCX); cursors.B = Math.max(cursors.B, rCX); }
-            else { cursors.C = Math.max(cursors.C, lCX); cursors.D = Math.max(cursors.D, rCX); }
+            
+            spillPending[matchedTag] = spillPending[matchedTag].filter(p => p.isNext);
+            if (spillPending[matchedTag].length === 0) delete spillPending[matchedTag];
         }
 
         if (secLower.includes('front') || secLower.includes('back')) {
