@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Save, Factory, Eye, Activity, Target,
   Undo2, Redo2, Move, AlertCircle, X, ChevronDown, ChevronUp, Settings, Filter,
-  Users, Scissors, TrendingUp, Info
+  Users, Scissors, TrendingUp, Info, RefreshCw
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,6 +15,7 @@ import { MachineInfoPanel } from '@/components/ui/MachineInfoPanel';
 import { useLineStore } from '@/store/useLineStore';
 import { LAYOUT_LOGIC_VERSION } from '@/utils/layoutGenerator';
 import { useToast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
 import type { Operation } from '@/types';
 
 const LinePlannerPage = () => {
@@ -27,7 +28,7 @@ const LinePlannerPage = () => {
     setLineParameters, visibleSection, setVisibleSection, undo, redo,
     canUndo, canRedo, isMoveMode, setMoveMode, selectedMachines,
     isDraggingActive, setDraggingActive, layoutError, warnings, clearWarnings,
-    layoutAlerts, dismissLayoutAlert
+    layoutAlerts, dismissLayoutAlert, fetchAndApplyOB, preparatoryOps
   } = useLineStore();
 
   // ─── Local input state (UI only — committed on blur/Enter, NOT on every keystroke) ───
@@ -35,6 +36,16 @@ const LinePlannerPage = () => {
   const [localHours, setLocalHours] = useState(workingHours.toString());
   const [localEfficiency, setLocalEfficiency] = useState(efficiency.toString());
   const [isAssemblyExpanded, setIsAssemblyExpanded] = useState(false);
+
+  useEffect(() => {
+    // Only fetch from backend if we don't already have operations loaded locally
+    if (currentLine?.lineNo && (currentLine as any).styleNo && (currentLine as any).coneNo) {
+      if (operations.length === 0) {
+        fetchAndApplyOB(currentLine.lineNo, (currentLine as any).styleNo, (currentLine as any).coneNo);
+      }
+    }
+  }, [currentLine?.lineNo, (currentLine as any)?.styleNo, (currentLine as any)?.coneNo, fetchAndApplyOB, operations.length]);
+
 
   // ─── HOT REFRESH: Auto-update layout when logic code changes ──────────────────
   const { layoutLogicVersion, setLayoutLogicVersion } = useLineStore();
@@ -162,13 +173,13 @@ const LinePlannerPage = () => {
       const isAssySec = sec.toLowerCase().includes('assembly');
 
       const relevantOps = operations.filter(op => {
-        const opSec = (op.section || "Other").toLowerCase();
+        const opSec = (op.section || "Other").trim().toLowerCase();
         const opNameKey = (op.op_name || '').trim().toLowerCase();
         if (isAssySec) {
           const countInThisSec = opsBySection[sec]?.[opNameKey]?.count || 0;
           return opSec.includes('assembly') && countInThisSec > 0;
         }
-        return opSec === sec.toLowerCase();
+        return opSec === sec;
       });
 
       if (relevantOps.length === 0 && !opsBySection[sec]) return;
@@ -219,13 +230,19 @@ const LinePlannerPage = () => {
       ? Math.min(minPrepOutput === Infinity ? 999999 : minPrepOutput, aggregateAssemblyOutput)
       : (minPrepOutput === Infinity ? 0 : minPrepOutput);
 
+    const totalOperatorsCount = prodMachines.filter(m => !m.isInspection).length;
+    const lineCapacity = totalStyleSMV > 0
+      ? Math.floor((totalOperatorsCount * workingHours * 60 * (efficiency / 100)) / totalStyleSMV / 100) * 100
+      : 0;
+
     return {
       sectionMetrics,
       aggregateAssemblyOutput,
       totalAssemblyOperatorsCount: totalAssemblyOpsCount,
       actualOutput: actualOutput === 999999 ? 0 : actualOutput,
       totalOperators: prodMachines.length,
-      totalStyleSMV
+      totalStyleSMV,
+      lineCapacity
     };
   }, [operations, machineLayout, workingHours, efficiency, targetOutput]);
 
@@ -258,10 +275,20 @@ const LinePlannerPage = () => {
             <h1 className="text-xl font-bold leading-tight uppercase tracking-tight">
               {currentLine ? `${currentLine.lineNo}` : 'Factory Twin'}
             </h1>
-            {currentLine?.styleNo && (
-              <p className="text-[11px] text-muted-foreground uppercase tracking-widest font-black text-left">
-                {currentLine.styleNo}
-              </p>
+            {currentLine?.coneNo && (
+              <div className="flex items-center gap-3">
+                <p className="text-[11px] text-muted-foreground uppercase tracking-widest font-black text-left">
+                  {currentLine.coneNo}
+                </p>
+                {currentLine.buyer && (
+                  <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20">
+                    <Users className="w-3 h-3 text-primary" />
+                    <span className="text-[9px] font-black uppercase tracking-widest text-primary">
+                      {currentLine.buyer}
+                    </span>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -289,30 +316,7 @@ const LinePlannerPage = () => {
 
       {/* Status banners */}
       <AnimatePresence>
-        {(layoutError || (warnings && warnings.length > 0)) && (
-          <motion.div
-            key="layout-status"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className={`${layoutError ? 'bg-red-600 border-red-500/50' : 'bg-emerald-600 border-emerald-500/50'} text-white px-6 py-3 flex items-center justify-between shadow-2xl z-20 border-b`}
-          >
-            <div className="flex items-center gap-3">
-              <div className={`p-1.5 ${layoutError ? 'bg-white/20 animate-pulse' : 'bg-white/10'} rounded-full`}>
-                <AlertCircle className="w-5 h-5" />
-              </div>
-              <div className="flex flex-col">
-                <span className="font-black text-[11px] uppercase tracking-[0.2em]">Layout Status Alert</span>
-                <p className="text-[12px] font-bold opacity-90 leading-tight">
-                  {layoutError || (warnings && warnings[0])}
-                </p>
-              </div>
-            </div>
-            <Button variant="ghost" size="icon" onClick={() => clearWarnings()} className="h-8 w-8 text-white/50 hover:text-white hover:bg-white/10 rounded-full">
-              <X className="w-5 h-5" />
-            </Button>
-          </motion.div>
-        )}
+        {/* Redundant banners suppressed as per user request to only show border violations */}
 
         {layoutAlerts.map(alert => (
           <motion.div
@@ -320,19 +324,15 @@ const LinePlannerPage = () => {
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className={
-              alert.type === 'red'
-                ? 'bg-red-600 text-white px-6 py-3 flex items-center justify-between shadow-xl z-20 border-b border-red-500/40'
-                : 'bg-emerald-600 text-white px-6 py-3 flex items-center justify-between shadow-xl z-20 border-b border-emerald-500/40'
-            }
+            className="bg-red-600 text-white px-6 py-3 flex items-center justify-between shadow-xl z-20 border-b border-red-500/40"
           >
             <div className="flex items-center gap-3">
-              <div className={`p-1.5 rounded-full ${alert.type === 'red' ? 'bg-white/20 animate-pulse' : 'bg-white/10'}`}>
+              <div className="p-1.5 rounded-full bg-white/20 animate-pulse">
                 <AlertCircle className="w-5 h-5" />
               </div>
               <div className="flex flex-col">
                 <span className="font-black text-[11px] uppercase tracking-[0.2em]">
-                  {alert.type === 'red' ? 'Space Violation' : 'Overflow Info'}
+                  Space Violation
                 </span>
                 <p className="text-[12px] font-bold opacity-90 leading-tight">{alert.message}</p>
               </div>
@@ -473,6 +473,28 @@ const LinePlannerPage = () => {
               </div>
             </div>
 
+            {/* Preparatory Processes — right after Production Specs */}
+            {preparatoryOps && preparatoryOps.length > 0 && (
+              <div className="rounded-3xl overflow-hidden border border-amber-500/20 shadow-sm text-left">
+                <div className="bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-amber-500/5 px-5 py-3.5 flex items-center gap-3 border-b border-amber-500/15">
+                  <Scissors className="w-4 h-4 text-amber-500 flex-shrink-0" />
+                  <span className="text-[11px] font-black uppercase tracking-[0.15em] text-foreground">Preparatory Processes</span>
+                  <span className="ml-auto text-[10px] bg-amber-500 text-white px-2 py-0.5 rounded-full font-black shadow-sm shadow-amber-500/30">{preparatoryOps.length}</span>
+                </div>
+                <div className="p-3 space-y-1.5 max-h-48 overflow-y-auto">
+                  {preparatoryOps.map((op, i) => (
+                    <div key={i} className="flex items-center gap-2.5 px-3 py-2.5 rounded-2xl hover:bg-amber-500/5 transition-colors group">
+                      <span className="text-[11px] font-black text-amber-500/50 min-w-[20px] text-right">{i + 1}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[13px] font-bold text-foreground/90 truncate">{op.op_name}</p>
+                        <p className="text-[10px] font-medium text-muted-foreground/60 mt-0.5">{op.machine_type} · {op.smv?.toFixed(2)} min</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Line Statistics */}
             <div className="text-left py-2">
               <h2 className="text-[11px] font-black uppercase tracking-[0.2em] text-muted-foreground mb-6 px-1">Line Statistics</h2>
@@ -507,6 +529,17 @@ const LinePlannerPage = () => {
                     <p className="text-[26px] font-black leading-none tracking-tight">{stats.actualOutput}</p>
                   </div>
                 </div>
+
+                <div className="group flex items-center gap-4 p-5 rounded-3xl bg-purple-500/10 border-2 border-purple-500/20 shadow-sm transition-all hover:scale-[1.02]">
+                  <div className="p-3 rounded-2xl bg-purple-500 text-white shadow-lg shadow-purple-500/20">
+                    <Target className="w-6 h-6" />
+                  </div>
+                  <div className="flex-1">
+                    <span className="text-[9px] uppercase font-black text-purple-600/80 block mb-0.5 tracking-widest">Line Capacity</span>
+                    <p className="text-[26px] font-black leading-none tracking-tight">{stats.lineCapacity.toLocaleString()}</p>
+                  </div>
+                </div>
+
               </div>
             </div>
 

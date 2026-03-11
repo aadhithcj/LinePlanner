@@ -22,6 +22,7 @@ import {
 } from "@/utils/layoutGenerator";
 import { calculateMachineRequirements } from '@/utils/lineBalancing';
 import { toast } from 'sonner';
+import { API_BASE_URL } from '../config';
 
 interface LineStore {
   savedLines: LineData[];
@@ -30,6 +31,7 @@ interface LineStore {
   machineLayout: MachinePosition[];
   sectionLayout: SectionLayout[];
   operations: Operation[];
+  preparatoryOps: Operation[];
 
   selectedMachines: string[];
   selectedMachine: MachinePosition | null;
@@ -38,12 +40,14 @@ interface LineStore {
     lineNo: string,
     styleNo: string,
     coneNo: string,
+    buyer: string,
     operations: Operation[],
     efficiency?: number,
     targetOutput?: number,
     totalSMV?: number,
     workingHours?: number,
-    sourceSheet?: string
+    sourceSheet?: string,
+    preparatoryOps?: Operation[]
   ) => LineData;
 
   saveLine: (line: LineData) => void;
@@ -51,6 +55,7 @@ interface LineStore {
   deleteLine: (id: string) => void;
 
   setOperations: (operations: Operation[]) => void;
+  setPreparatoryOps: (ops: Operation[]) => void;
   generateMachineLayout: (operations: Operation[]) => void;
 
   targetOutput: number;
@@ -93,9 +98,10 @@ interface LineStore {
   layoutAlerts: { id: string; type: 'green' | 'red'; message: string }[];
   dismissLayoutAlert: (id: string) => void;
   checkLayoutAlerts: () => void;
-  updateLineWithNewOB: (newOperations: Operation[], sourceSheet?: string) => void;
+  updateLineWithNewOB: (newOperations: Operation[], sourceSheet?: string, preparatoryOps?: Operation[]) => void;
   resetLine: () => void;
   setMachineLayout: (layout: MachinePosition[]) => void;
+  fetchAndApplyOB: (lineNo: string, styleNo: string, conNo: string) => Promise<void>;
 }
 
 const FT = 0.3048;
@@ -146,13 +152,14 @@ export const useLineStore = create<LineStore>()(persist((set, get) => ({
   operations: [],
   selectedMachines: [],
   selectedMachine: null,
-  targetOutput: 1000,
+  targetOutput: 1800,
   workingHours: 9,
   visibleSection: null,
+  preparatoryOps: [],
   setVisibleSection: (section) => set({ visibleSection: section }),
   layoutLogicVersion: 0,
   setLayoutLogicVersion: (v) => set({ layoutLogicVersion: v }),
-  efficiency: 100,
+  efficiency: 90,
   past: [] as any[],
   future: [] as any[],
   canUndo: false,
@@ -178,12 +185,14 @@ export const useLineStore = create<LineStore>()(persist((set, get) => ({
   dismissLayoutAlert: (id: string) => set((state: any) => ({ layoutAlerts: state.layoutAlerts.filter((a: any) => a.id !== id) })),
 
   setMachineLayout: (layout: MachinePosition[]) => set({ machineLayout: layout }),
+  setPreparatoryOps: (ops: Operation[]) => set({ preparatoryOps: ops }),
 
   resetLine: () => set({
     currentLine: null,
     machineLayout: [],
     sectionLayout: [],
     operations: [],
+    preparatoryOps: [],
     selectedMachine: null,
     selectedMachines: [],
     warnings: [],
@@ -234,9 +243,7 @@ export const useLineStore = create<LineStore>()(persist((set, get) => ({
     const lineNo = state.currentLine?.lineNo || "Line 1";
     const { machines, sections, warnings } = generateLayout(currentOps, targetOutput, workingHours, efficiency, lineNo);
 
-    if (warnings && warnings.length > 0) {
-      warnings.forEach(w => toast.error(w));
-    }
+    // Toasts removed to comply with 'alerts should only come from border violations' rule
 
     const currentLine = state.currentLine;
     const updatedLine = currentLine ? {
@@ -270,9 +277,7 @@ export const useLineStore = create<LineStore>()(persist((set, get) => ({
     const lineNo = currentLine?.lineNo || "Line 1";
     const { machines, sections, warnings } = generateLayout(operations, targetOutput, workingHours, efficiency, lineNo);
 
-    if (warnings && warnings.length > 0) {
-      warnings.forEach(w => toast.error(w));
-    }
+    // Toasts removed
 
     set({ machineLayout: machines, sectionLayout: sections, warnings: warnings || [] });
     setTimeout(() => (get() as any).checkLayoutAlerts(), 0);
@@ -284,21 +289,19 @@ export const useLineStore = create<LineStore>()(persist((set, get) => ({
     set({ operations, selectedMachine: null });
   },
 
-  createLine: (lineNo, styleNo, coneNo, operations, efficiency = 100, inputTargetOutput = 1000, inputTotalSMV?: number, inputWorkingHours = 9, sourceSheet = "") => {
+  createLine: (lineNo, styleNo, coneNo, buyer, operations, efficiency = 90, inputTargetOutput = 1800, inputTotalSMV?: number, inputWorkingHours = 9, sourceSheet = "", preparatoryOps = []) => {
     (get() as any).takeSnapshot();
     const targetOutput = inputTargetOutput;
     const workingHours = inputWorkingHours;
     const { machines, sections, warnings } = generateLayout(operations, targetOutput, workingHours, efficiency, lineNo);
 
-    if (warnings && warnings.length > 0) {
-      warnings.forEach(w => toast.error(w));
-    }
+    // Toasts removed
 
     const calculatedTotal = operations.reduce((sum, op) => sum + op.smv, 0);
     const totalSMV = inputTotalSMV || calculatedTotal;
 
     const line: LineData = {
-      id: uuidv4(), lineNo, styleNo, coneNo, operations,
+      id: uuidv4(), lineNo, styleNo, coneNo, buyer, operations, preparatoryOps,
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       machineLayout: machines, sectionLayout: sections, totalSMV,
       targetOutput, workingHours, efficiency, sourceSheet
@@ -308,6 +311,7 @@ export const useLineStore = create<LineStore>()(persist((set, get) => ({
       machineLayout: machines,
       sectionLayout: sections,
       operations,
+      preparatoryOps,
       currentLine: line,
       selectedMachine: null,
       targetOutput,
@@ -324,9 +328,12 @@ export const useLineStore = create<LineStore>()(persist((set, get) => ({
   // Previously it remapped old machine positions to new operation labels,
   // which meant the 3D layout never changed after the first OB upload.
   // ─────────────────────────────────────────────────────────────────────────
-  updateLineWithNewOB: (newOperations: Operation[], sourceSheet = "") => {
+  updateLineWithNewOB: (newOperations: Operation[], sourceSheet = "", preparatoryOpsParam?: Operation[]) => {
     (get() as any).takeSnapshot();
-    const { targetOutput, workingHours, efficiency, currentLine } = get();
+    const state = get();
+    // Default to the argument array, or fallback to the store's current preparatoryOps
+    const preparatoryOpsToUse = preparatoryOpsParam ?? state.preparatoryOps;
+    const { targetOutput, workingHours, efficiency, currentLine } = state;
 
     console.log(`[Store] updateLineWithNewOB — ${newOperations.length} operations received`);
 
@@ -339,6 +346,7 @@ export const useLineStore = create<LineStore>()(persist((set, get) => ({
       selectedMachines: [],
       warnings: [],
       currentLine: null,
+      preparatoryOps: preparatoryOpsToUse,
     });
 
     if (newOperations.length === 0) return;
@@ -354,9 +362,7 @@ export const useLineStore = create<LineStore>()(persist((set, get) => ({
       lineNo
     );
 
-    if (warnings?.length > 0) {
-      warnings.forEach(w => toast.error(w));
-    }
+    // Toasts removed
 
     const newTotalSMV = newOperations.reduce((sum, op) => sum + op.smv, 0);
 
@@ -370,6 +376,7 @@ export const useLineStore = create<LineStore>()(persist((set, get) => ({
         ? {
           ...currentLine,
           operations: newOperations,
+          preparatoryOps: preparatoryOpsToUse,
           machineLayout: machines,
           sectionLayout: sections,
           totalSMV: newTotalSMV,
@@ -386,13 +393,29 @@ export const useLineStore = create<LineStore>()(persist((set, get) => ({
 
   saveLine: (line) => {
     (get() as any).takeSnapshot();
-    set((state) => ({
-      savedLines: [...state.savedLines, line],
-      currentLine: line,
-      operations: line.operations,
-      machineLayout: line.machineLayout,
-      sectionLayout: line.sectionLayout || []
-    }));
+    set((state) => {
+      const existingIdx = state.savedLines.findIndex((l) => l.id === line.id);
+      let newSavedLines = [...state.savedLines];
+
+      const updatedLine = {
+        ...line,
+        updatedAt: new Date().toISOString()
+      };
+
+      if (existingIdx !== -1) {
+        newSavedLines[existingIdx] = updatedLine;
+      } else {
+        newSavedLines.push(updatedLine);
+      }
+
+      return {
+        savedLines: newSavedLines,
+        currentLine: updatedLine,
+        operations: updatedLine.operations,
+        machineLayout: updatedLine.machineLayout,
+        sectionLayout: updatedLine.sectionLayout || []
+      };
+    });
     setTimeout(() => (get() as any).checkLayoutAlerts(), 0);
   },
 
@@ -403,12 +426,17 @@ export const useLineStore = create<LineStore>()(persist((set, get) => ({
     set({
       currentLine: line,
       operations: line.operations,
+      preparatoryOps: line.preparatoryOps || [],
       machineLayout: line.machineLayout,
       sectionLayout: line.sectionLayout || [],
-      targetOutput: line.targetOutput || 1000,
+      targetOutput: line.targetOutput || 1800,
       workingHours: line.workingHours || 9,
-      efficiency: line.efficiency || 100,
-      selectedMachine: null
+      efficiency: line.efficiency || 90,
+      selectedMachine: null,
+      selectedMachines: [],
+      warnings: [],
+      layoutAlerts: [],
+      layoutError: null
     });
     setTimeout(() => (get() as any).checkLayoutAlerts(), 0);
   },
@@ -502,424 +530,218 @@ export const useLineStore = create<LineStore>()(persist((set, get) => ({
     });
   },
 
-  updateMachinesPositions: (machineIds) => {
-    (get() as any).takeSnapshot();
-
-    const affectedSections = new Set<string>();
-    let workLayout = get().machineLayout.map(m => {
-      if (machineIds.includes(m.id)) {
-        const info = getSpatialInfo(m.position.x, m.position.z, get().currentLine?.lineNo, m.section);
-        if (m.section) affectedSections.add(m.section.toLowerCase());
-        affectedSections.add(info.section.toLowerCase());
-        return { ...m, section: info.section, lane: info.lane, hasManualPosition: true };
-      }
-      return m;
-    });
-
-    const applyPhysicsToLane = (laneMachines: MachinePosition[], zones: any[], sectionStart: number, sectionEnd: number, laneKey: string, fixZ: (m: MachinePosition, minWZ: number, maxWZ: number) => number) => {
-        if (laneMachines.length === 0) return [];
-
-        let items = laneMachines.map(m => {
-            const dims = getMachineZoneDims(m.operation.machine_type);
-            const ry = m.rotation.y;
-            const cosR = Math.cos(ry), sinR = Math.sin(ry);
-            const hw = dims.length / 2, hd = dims.width / 2;
-            const corners = [{ x: -hw, z: -hd }, { x: hw, z: -hd }, { x: -hw, z: hd }, { x: hw, z: hd }];
-            let minWX = Infinity, maxWX = -Infinity, minWZ = Infinity, maxWZ = -Infinity;
-            corners.forEach(p => {
-                const wx = p.x * cosR + p.z * sinR;
-                const wz = -p.x * sinR + p.z * cosR;
-                if (wx < minWX) minWX = wx; if (wx > maxWX) maxWX = wx;
-                if (wz < minWZ) minWZ = wz; if (wz > maxWZ) maxWZ = wz;
-            });
-            const totalWidth = maxWX - minWX + 0.15; // padding
-            const leftX = m.position.x + minWX;
-            const targetZ = fixZ ? fixZ(m, minWZ, maxWZ) : m.position.z;
-            
-            return { m, isAnchor: machineIds.includes(m.id), x: leftX, w: totalWidth, id: m.id, minWX, targetZ };
-        });
-
-        const safeZones = zones.map((z: any) => ({
-            start: Math.max(z.start, sectionStart),
-            end: Math.min(z.end, sectionEnd)
-        })).filter((z: any) => z.end > z.start);
-
-        for (let i = 0; i < safeZones.length - 1; i++) {
-            const gapStart = safeZones[i].end;
-            const gapEnd = safeZones[i+1].start;
-            if (gapEnd > gapStart) {
-                items.push({ isAnchor: true, x: gapStart, w: gapEnd - gapStart, id: `gap-${i}`, minWX: 0, targetZ: 0, m: null as any });
-            }
-        }
-
-        items.sort((a, b) => a.x - b.x);
-
-        let changed = true;
-        let iters = 0;
-        while (changed && iters < 300) {
-            changed = false;
-            for (let i = 0; i < items.length - 1; i++) {
-                const left = items[i]; const right = items[i+1];
-                const overlap = (left.x + left.w) - right.x;
-                if (overlap > 0.001) {
-                    changed = true;
-                    if (left.isAnchor && right.isAnchor) right.x += overlap;
-                    else if (left.isAnchor) right.x += overlap;
-                    else if (right.isAnchor) left.x -= overlap;
-                    else { left.x -= overlap / 2; right.x += overlap / 2; }
-                }
-            }
-            
-            for (const item of items) {
-                if (!item.isAnchor || !item.id.startsWith('gap-')) {
-                    if (item.x < sectionStart) { item.x = sectionStart; changed = true; }
-                    if (item.x + item.w > sectionEnd) { item.x = sectionEnd - item.w; changed = true; }
-                }
-            }
-            items.sort((a, b) => a.x - b.x);
-            iters++;
-        }
-
-        const repacked: MachinePosition[] = [];
-        items.forEach(item => {
-            if (item.m) {
-                const finalX = item.x - item.minWX;
-                repacked.push({ ...item.m, position: { ...item.m.position, x: finalX, z: item.targetZ }, lane: laneKey as any });
-            }
-        });
-        return repacked;
-    };
-
-    affectedSections.forEach(sec => {
-      const isAssembly = sec.includes('assembly') || sec.includes('lane') || sec.includes('line');
-      const specs = getLayoutSpecs(get().currentLine?.lineNo);
-      
-      const isSpecial = (m: MachinePosition) =>
-        m.isInspection || m.operation.machine_type.toLowerCase().includes('inspection') ||
-        m.operation.machine_type.toLowerCase().includes('supermarket') ||
-        m.id.startsWith('board') || m.operation.machine_type.toLowerCase().includes('board');
-
-      if (isAssembly) {
-        const isCDGroup = sec.includes('assembly 3') || sec.includes('assembly 4');
-        const zones = isCDGroup ? specs.zonesCD : specs.zonesAB;
-        const ASSEMBLY_START = 114.0719 * FT;
-        const targetSpecs = (specs.sections as any)[sec] || (isCDGroup ? specs.sections.assemblyCD : specs.sections.assemblyAB);
-        const secEndX = targetSpecs?.end || (ASSEMBLY_START + 500);
-        const assemblyLanes = ['A', 'B', 'C', 'D'] as const;
-
-        const sectionMachines = workLayout.filter(m => (m.section || '').toLowerCase() === sec);
-        const repackedAssembly: MachinePosition[] = [];
-
-        assemblyLanes.forEach(laneKey => {
-          const LANE_Z: Record<string, number> = { A: -5.2, B: -6.8, C: 0.75, D: -0.75 };
-          const laneZ = LANE_Z[laneKey];
-          const laneMachines = sectionMachines
-            .filter(m => (m.lane || '').toUpperCase() === laneKey && !isSpecial(m));
-          
-          const repacked = applyPhysicsToLane(laneMachines, zones, ASSEMBLY_START, secEndX, laneKey, () => laneZ);
-          repackedAssembly.push(...repacked);
-        });
-
-        const specials = sectionMachines.filter(isSpecial);
-        const others = workLayout.filter(m => (m.section || '').toLowerCase() !== sec);
-        workLayout = [...others, ...repackedAssembly, ...specials];
-        return;
-      }
-
-      const isCDGroup = sec.includes('collar') || sec.includes('front');
-      const lane1 = isCDGroup ? 'C' : 'A';
-      const lane2 = isCDGroup ? 'D' : 'B';
-      const midZ = isCDGroup ? LANE_Z_CENTER_CD : LANE_Z_CENTER_AB;
-      const zones = isCDGroup ? specs.zonesCD : specs.zonesAB;
-      
-      const targetTag = Object.keys(specs.sections).find(k => sec.includes(k.toLowerCase()));
-      const targetSpecs = targetTag ? (specs.sections as any)[targetTag] : null;
-
-      const secStartX = targetSpecs?.start || 0;
-      const secEndX = targetSpecs?.end || (isCDGroup ? 110.0719 * FT : 109.9619 * FT);
-
-      const sectionMachines = workLayout.filter(m => (m.section || '').toLowerCase() === sec);
-      const prodMachines = sectionMachines.filter(m => !isSpecial(m));
-      
-      // Look for capacity overload
-      const capacityPx = secEndX - secStartX;
-      const requiredPxLength = prodMachines.reduce((sum, m) => {
-          return sum + getMachineZoneDims(m.operation.machine_type).length / 2.0;
-      }, 0);
-      
-      const hasAnchors = prodMachines.some(m => machineIds.includes(m.id));
-      if (hasAnchors && requiredPxLength > capacityPx) {
-         // Boot the edge machine
-         const unanchored = prodMachines.filter(m => !machineIds.includes(m.id));
-         if (unanchored.length > 0) {
-              const overflowTarget = findOverflowSection(sec, undefined, !isCDGroup);
-              if (overflowTarget !== sec.toLowerCase() && !overflowTarget.includes('assembly')) {
-                 const targetSpecsRef = (specs.sections as any)[overflowTarget];
-                 const targetStart = targetSpecsRef?.start || 0;
-                 const bootForward = targetStart > secStartX;
-                 
-                 unanchored.sort((a, b) => a.position.x - b.position.x);
-                 const machineToBoot = bootForward ? unanchored[unanchored.length - 1] : unanchored[0];
-                 
-                 machineToBoot.section = overflowTarget;
-                 // It will be picked up by the other section's loop if it was early, or we must ensure we add it to affectedSections
-                 if (!affectedSections.has(overflowTarget)) {
-                     affectedSections.add(overflowTarget);
-                 }
-                 
-                 // Remove it from this section's list for the physics solver
-                 const idx = sectionMachines.findIndex(m => m.id === machineToBoot.id);
-                 if (idx !== -1) sectionMachines.splice(idx, 1);
-              }
-         }
-      }
-
-      const repackedAll: MachinePosition[] = [];
-      
-      [lane1, lane2].forEach(laneKey => {
-          const laneMachines = sectionMachines.filter(m => m.lane === laneKey && !isSpecial(m));
-          const repacked = applyPhysicsToLane(laneMachines, zones, secStartX, secEndX, laneKey, (m, minWZ, maxWZ) => {
-              return (laneKey === 'A' || laneKey === 'C') ? (midZ - minWZ) : (midZ - maxWZ);
-          });
-          repackedAll.push(...repacked);
-      });
-
-      const specials = sectionMachines.filter(isSpecial);
-      const others = workLayout.filter(m => (m.section || '').toLowerCase() !== sec);
-      workLayout = [...others, ...repackedAll, ...specials];
-    });
-
-    set({ machineLayout: workLayout, isDraggingActive: false });
-    setTimeout(() => (get() as any).checkLayoutAlerts(), 0);
-  },
 
   checkLayoutAlerts: () => {
     const layout = get().machineLayout;
-    const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-    const newAlerts: { id: string; type: 'green' | 'red'; message: string }[] = [];
+    if (!layout || layout.length === 0) return;
 
-    const overflowPairs = new Set<string>();
+    const cap = (s: string) => {
+      const mapping: Record<string, string> = {
+        'cuff': 'Cuff',
+        'sleeve': 'Sleeve',
+        'back': 'Back',
+        'collar': 'Collar',
+        'front': 'Front',
+        'assemblyAB': 'Assembly AB',
+        'assemblyCD': 'Assembly CD'
+      };
+      return mapping[s] || s.charAt(0).toUpperCase() + s.slice(1).replace(/([a-z])([A-Z])/g, '$1 $2');
+    };
+
+    const specs = getLayoutSpecs(get().currentLine?.lineNo);
+    const sections = specs.sections;
+    const newAlerts: { id: string; type: 'red'; message: string }[] = [];
+    const violationKeys = new Set<string>();
+
     layout.forEach(m => {
-      const origSec = (m.operation.section || '').toLowerCase().trim();
-      const curSec = (m.section || '').toLowerCase().trim();
-      if (!origSec || !curSec) return;
-
-      const normOrig = origSec.includes('assembly') ? 'assembly' : origSec;
-      const normCur = curSec.includes('assembly') ? 'assembly' : curSec;
-
-      if (normOrig === normCur) return;
       if (m.isInspection || m.operation.machine_type.toLowerCase().includes('inspection')) return;
       if (m.operation.machine_type.toLowerCase().includes('supermarket')) return;
 
-      overflowPairs.add(`${normOrig}→${normCur}`);
-    });
+      const labelSec = (m.section || '').toLowerCase().trim();
+      if (!labelSec) return;
 
-    overflowPairs.forEach(pair => {
-      const [orig = '', cur = ''] = pair.split('→');
-      const id = `overflow-${pair}`;
-      const displayOrig = orig === 'assembly' ? 'Assembly' : cap(orig);
-      const displayCur = cur === 'assembly' ? 'Assembly' : cap(cur);
-      newAlerts.push({
-        id,
-        type: 'green',
-        message: `${displayOrig} overflow handled – machines placed in ${displayCur} section`
-      });
-    });
+      const machineX = m.position.x;
+      const dims = getMachineZoneDims(m.operation.machine_type);
+      const halfLen = dims.length / 2;
 
-    const allSections = new Set<string>(layout.map(m => (m.section || '').toLowerCase()).filter(Boolean) as string[]);
-    let assemblyViolated = false;
+      let targetSecKey = labelSec;
+      if (labelSec.includes('assembly') || labelSec.includes('a1') || labelSec.includes('a2')) {
+        targetSecKey = m.position.z < -2 ? 'assemblyAB' : 'assemblyCD';
+      }
 
-    allSections.forEach(sec => {
-      const specs = getLayoutSpecs(get().currentLine?.lineNo);
-      const targetSpecs = specs.sections[sec as keyof typeof specs.sections];
-      const sectionEnd = targetSpecs?.end || 500 * FT;
-      if (!sectionEnd) return;
+      const targetBounds = (sections as any)[targetSecKey];
+      if (!targetBounds) return;
 
-      const violated = layout.some(m => {
-        if ((m.section || '').toLowerCase() !== sec) return false;
-        if (m.isInspection || m.operation.machine_type.toLowerCase().includes('inspection')) return false;
-        if (m.operation.machine_type.toLowerCase().includes('supermarket')) return false;
-        const halfLen = getMachineZoneDims(m.operation.machine_type).length / 2;
-        return (m.position.x + halfLen) > (sectionEnd + 0.1);
-      });
+      const isOutside = (machineX + halfLen > targetBounds.end + 0.1) || (machineX - halfLen < targetBounds.start - 0.1);
 
-      if (violated) {
-        if (sec.includes('assembly')) {
-          assemblyViolated = true;
+      if (isOutside) {
+        let actualSecKey = null;
+        for (const [sKey, sBounds] of Object.entries(sections)) {
+          if (machineX >= (sBounds as any).start - 0.5 && machineX <= (sBounds as any).end + 0.5) {
+            actualSecKey = sKey;
+            break;
+          }
+        }
+
+        if (actualSecKey && actualSecKey !== targetSecKey) {
+          const pair = [targetSecKey, actualSecKey].sort().join('&');
+          violationKeys.add(pair);
         } else {
-          newAlerts.push({
-            id: `violation-${sec}`,
-            type: 'red',
-            message: `Space limit exceeded – ${cap(sec)} section`
-          });
+          violationKeys.add(targetSecKey);
         }
       }
     });
 
-    if (assemblyViolated) {
+    const allViolatingSections = new Set<string>();
+    violationKeys.forEach(key => {
+      if (key.includes('&')) {
+        key.split('&').forEach(k => allViolatingSections.add(cap(k)));
+      } else {
+        allViolatingSections.add(cap(key));
+      }
+    });
+
+    if (allViolatingSections.size > 0) {
+      const sectionsArray = Array.from(allViolatingSections);
+      let message = "";
+      if (sectionsArray.length === 1) {
+        message = `${sectionsArray[0]}`;
+      } else if (sectionsArray.length === 2) {
+        message = `${sectionsArray[0]} & ${sectionsArray[1]}`;
+      } else {
+        const last = sectionsArray.pop();
+        message = `${sectionsArray.join(", ")} & ${last}`;
+      }
+
       newAlerts.push({
-        id: `violation-assembly`,
+        id: 'global-space-violation',
         type: 'red',
-        message: `Space limit exceeded – Assembly section`
+        message
       });
     }
 
-    const prev = get().layoutAlerts;
-    const dismissedGreenIds = new Set(prev.filter((a: any) => a.type === 'green').map((a: any) => a.id));
-
-    const merged = newAlerts.filter(a => {
-      if (a.type === 'green' && dismissedGreenIds.has(a.id)) return false;
-      return true;
-    });
-
-    set({ layoutAlerts: merged });
-
-    merged.filter(a => a.type === 'green').forEach(a => {
-      setTimeout(() => {
-        set((state: any) => ({ layoutAlerts: state.layoutAlerts.filter((x: any) => x.id !== a.id) }));
-      }, 5000);
-    });
+    set({ layoutAlerts: newAlerts, layoutError: null, warnings: [] });
   },
 
   moveSelectedMachines: (deltaX, deltaZ) => {
     const ids = get().selectedMachines;
     if (ids.length === 0) return;
 
-    const preDrag = get().preDragLayout;
-
-    const withMovedMachines = get().machineLayout.map(m => {
-      if (ids.includes(m.id)) {
-        const newX = m.position.x + deltaX;
-        const newZ = m.position.z + deltaZ;
-        const info = getSpatialInfo(newX, newZ, m.section);
-        return { ...m, section: info.section, lane: info.lane, position: { ...m.position, x: newX, z: newZ }, hasManualPosition: true };
-      }
-      return m;
+    // During active drag, we strictly allow visual translation.
+    // We DO NOT update `slotIndex` or shift peers here. 
+    // That is reserved for `updateMachinesPositions` (onDrop).
+    set({
+      machineLayout: get().machineLayout.map(m => {
+        if (ids.includes(m.id)) {
+          const newX = m.position.x + deltaX;
+          const newZ = m.position.z + deltaZ;
+          return { 
+            ...m, 
+            position: { ...m.position, x: newX, z: newZ }, 
+            hasManualPosition: true 
+          };
+        }
+        return m;
+      })
     });
+  },
 
-    if (!preDrag) {
-      set({ machineLayout: withMovedMachines });
+  updateMachinesPositions: (machineIds) => {
+    (get() as any).takeSnapshot();
+    
+    // We only support swapping single machine explicitly right now 
+    // based on dragging the pivot.
+    const draggedId = machineIds[0];
+    if (!draggedId) {
+      set({ isDraggingActive: false });
+      setTimeout(() => (get() as any).checkLayoutAlerts(), 0);
       return;
     }
 
-    const draggedMachines = withMovedMachines.filter(m => ids.includes(m.id));
-    const sectionsWithDrag = new Set<string>();
-    draggedMachines.forEach(m => { if (m.section) sectionsWithDrag.add(m.section.toLowerCase()); });
-
-    let finalLayout = withMovedMachines;
-
-    sectionsWithDrag.forEach(secLower => {
-      const isAssembly = secLower.includes('assembly') || secLower.includes('lane') || secLower.includes('line');
-
-      if (isAssembly) {
-        const dragged = draggedMachines.find(m => (m.section || '').toLowerCase() === secLower);
-        if (!dragged) return;
-        const draggedLane = (dragged.lane || 'A').toUpperCase();
-        const draggedX = dragged.position.x;
-        const draggedWidth = getMachineZoneDims(dragged.operation.machine_type).length;
-
-        const peers = finalLayout
-          .filter(m =>
-            !ids.includes(m.id) &&
-            (m.section || '').toLowerCase() === secLower &&
-            (m.lane || 'A').toUpperCase() === draggedLane &&
-            !m.isInspection &&
-            !m.operation.machine_type.toLowerCase().includes('inspection') &&
-            !m.operation.machine_type.toLowerCase().includes('supermarket') &&
-            !m.id.startsWith('board') &&
-            !m.operation.machine_type.toLowerCase().includes('board')
-          )
-          .map(m => ({ ...m, preDragX: preDrag[m.id]?.x ?? m.position.x }))
-          .sort((a, b) => a.preDragX - b.preDragX);
-
-        const insertIdx = peers.findIndex(o => o.preDragX >= draggedX);
-        const peerIds = new Set(peers.map(o => o.id));
-        const specs = getLayoutSpecs(get().currentLine?.lineNo);
-        const secEndX = (specs.sections as any)[secLower]?.end ?? (114.0719 * FT);
-
-        finalLayout = finalLayout.map(m => {
-          if (ids.includes(m.id)) return m;
-          if ((m.section || '').toLowerCase() !== secLower) return m;
-          if (!peerIds.has(m.id)) return m;
-
-          const anchor = peers.find(o => o.id === m.id)!;
-          const idx = peers.indexOf(anchor);
-          if (insertIdx === -1 || idx < insertIdx) {
-            return { ...m, position: { ...m.position, x: anchor.preDragX } };
-          } else {
-            const peerWidth = getMachineZoneDims(m.operation.machine_type).length;
-            const pushedX = Math.min(anchor.preDragX + draggedWidth, secEndX - peerWidth);
-            return { ...m, position: { ...m.position, x: pushedX } };
-          }
-        });
+    let finalLayout = [...get().machineLayout];
+    
+    // 1. Locate the moving machine and its section
+    const movingMachineIndex = finalLayout.findIndex(m => m.id === draggedId);
+    if (movingMachineIndex === -1) {
+        set({ isDraggingActive: false });
+        setTimeout(() => (get() as any).checkLayoutAlerts(), 0);
         return;
-      }
+    }
+    
+    const movingMachine = finalLayout[movingMachineIndex];
+    if (movingMachine.slotIndex === undefined) {
+        // Fallback for special machines outside slot grid (e.g., Inspections/Supermarkets)
+        set({ isDraggingActive: false });
+        setTimeout(() => (get() as any).checkLayoutAlerts(), 0);
+        return;
+    }
 
-      const dragged = draggedMachines.find(m => (m.section || '').toLowerCase() === secLower);
-      if (!dragged) return;
+    // 2. Find the slot array attached to its specific section
+    const sectionIndex = get().sectionLayout.findIndex(s => s.name.toLowerCase() === (movingMachine.section || "").toLowerCase());
+    if (sectionIndex === -1) {
+        set({ isDraggingActive: false });
+        setTimeout(() => (get() as any).checkLayoutAlerts(), 0);
+        return;
+    }
+    
+    const targetSection = get().sectionLayout[sectionIndex];
+    if (!targetSection.slots || targetSection.slots.length === 0) {
+        set({ isDraggingActive: false });
+        setTimeout(() => (get() as any).checkLayoutAlerts(), 0);
+        return;
+    }
 
-      const draggedX = dragged.position.x;
-      const draggedWidth = getMachineZoneDims(dragged.operation.machine_type).length;
-      const draggedOpSec = (dragged.operation.section || secLower).toLowerCase();
+    // 3. Find the closest slot coordinate to the dropped real position
+    let closestSlotIndex = -1;
+    let minDistance = Infinity;
 
-      const peers = finalLayout
-        .filter(m =>
-          !ids.includes(m.id) &&
-          (m.section || '').toLowerCase() === secLower &&
-          (m.operation.section || secLower).toLowerCase() === draggedOpSec &&
-          !m.isInspection &&
-          !m.operation.machine_type.toLowerCase().includes('inspection') &&
-          !m.operation.machine_type.toLowerCase().includes('supermarket') &&
-          !m.id.startsWith('board') &&
-          !m.operation.machine_type.toLowerCase().includes('board')
-        )
-        .map(m => ({ ...m, preDragX: preDrag[m.id]?.x ?? m.position.x }))
-        .sort((a, b) => a.preDragX - b.preDragX);
-
-      const insertIdx = peers.findIndex(o => o.preDragX >= draggedX);
-      const peerIds = new Set(peers.map(o => o.id));
-
-      const specialIds = new Set(
-        finalLayout.filter(m =>
-          !ids.includes(m.id) &&
-          (m.section || '').toLowerCase() === secLower &&
-          (m.isInspection || m.operation.machine_type.toLowerCase().includes('inspection') ||
-            m.operation.machine_type.toLowerCase().includes('supermarket') ||
-            m.id.startsWith('board') || m.operation.machine_type.toLowerCase().includes('board'))
-        ).map(m => m.id)
-      );
-
-      finalLayout = finalLayout.map(m => {
-        if (ids.includes(m.id)) return m;
-        if ((m.section || '').toLowerCase() !== secLower) return m;
-
-        if (specialIds.has(m.id)) {
-          const savedX = preDrag[m.id]?.x;
-          return savedX !== undefined ? { ...m, position: { ...m.position, x: savedX } } : m;
+    targetSection.slots.forEach((slot, index) => {
+        const dx = slot.position.x - movingMachine.position.x;
+        const dz = slot.position.z - movingMachine.position.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        
+        // We only allow dropping onto slots within a reasonable tolerance (e.g., inside the section bounds)
+        if (dist < minDistance) {
+            minDistance = dist;
+            closestSlotIndex = index;
         }
-
-        if (!peerIds.has(m.id)) {
-          const savedX = preDrag[m.id]?.x;
-          return savedX !== undefined ? { ...m, position: { ...m.position, x: savedX } } : m;
-        }
-
-        const anchor = peers.find(o => o.id === m.id)!;
-        const idx = peers.indexOf(anchor);
-
-        if (insertIdx === -1 || idx < insertIdx) {
-          return { ...m, position: { ...m.position, x: anchor.preDragX } };
-        } else {
-          const peerWidth = getMachineZoneDims(m.operation.machine_type).length;
-          const layoutSpecs = getLayoutSpecs(get().currentLine?.lineNo);
-          const targetSpecs = (layoutSpecs.sections as any)[secLower];
-          const secEndX = targetSpecs?.end || (114.0719 * FT);
-          const pushedX = Math.min(anchor.preDragX + draggedWidth, secEndX - peerWidth);
-          return { ...m, position: { ...m.position, x: pushedX } };
-        }
-      });
     });
 
-    set({ machineLayout: finalLayout });
+    if (closestSlotIndex !== -1 && minDistance < 10.0) { // Reasonable snap radius
+        
+        // 4. Find the machine currently occupying `closestSlotIndex`
+        const targetMachineIndex = finalLayout.findIndex(m => 
+            (m.section || "").toLowerCase() === (movingMachine.section || "").toLowerCase() &&
+            m.slotIndex === closestSlotIndex &&
+            m.id !== movingMachine.id // Ensure we don't swap with ourselves
+        );
+
+        if (targetMachineIndex !== -1) {
+            // Target exists: SWAP slot properties
+            const origSlot = movingMachine.slotIndex;
+            finalLayout[movingMachineIndex] = { ...finalLayout[movingMachineIndex], slotIndex: closestSlotIndex };
+            finalLayout[targetMachineIndex] = { ...finalLayout[targetMachineIndex], slotIndex: origSlot };
+        } else {
+            // Target empty: simply assign the new slot property to moving machine
+            finalLayout[movingMachineIndex] = { ...finalLayout[movingMachineIndex], slotIndex: closestSlotIndex };
+        }
+    }
+
+    // 5. Hard SNAP all slotted machines back to their assigned `slotIndex` coordinates
+    finalLayout = finalLayout.map(m => {
+        if (m.slotIndex !== undefined && (m.section || "").toLowerCase() === targetSection.name.toLowerCase()) {
+            const assignedSlot = targetSection.slots![m.slotIndex];
+            if (assignedSlot) {
+                return { ...m, position: { ...assignedSlot.position } };
+            }
+        }
+        // If they don't belong to this section or lack a slot index, return as is.
+        // If a machine outside the grid was moved, its position is already preserved in `moveSelectedMachines`.
+        return m;
+    });
+
+    set({ machineLayout: finalLayout, isDraggingActive: false });
+    setTimeout(() => (get() as any).checkLayoutAlerts(), 0);
   },
 
   _reLayoutSection: (currentLayout: MachinePosition[], secLower: string, isFinalCommit = true) => {
@@ -1078,7 +900,7 @@ export const useLineStore = create<LineStore>()(persist((set, get) => ({
         if (isFinalCommit) {
           finalX = packedX;
         } else {
-          let targetX = Math.min(m.position.x, ASSEMBLY_START_X - currentWidth - 0.5);
+          let targetX = m.position.x;
           finalX = (m.position.x === 0 && m.position.z === 0)
             ? packedX
             : Math.max(getNextValidX(targetX, currentWidth, zones), packedX);
@@ -1128,56 +950,17 @@ export const useLineStore = create<LineStore>()(persist((set, get) => ({
       const lane = spatialInfo.lane;
       const ry = -Math.PI / 2;
       const bounds = computeFootprint(mRaw.operation.machine_type, inspectDims, ry);
-      const inspectXStart = getNextValidX(currentSeqX + 0.1, bounds.totalWidth, activeZones);
-      const autoX = inspectXStart - bounds.minWorldX;
+      // Always place inspection exactly 0.2m after last production machine — same as layout generator.
+      // Never use stale mRaw.position: always recompute from live cursor so all sections are consistent.
+      const gapAfterLastMachine = 0.2;
+      const inspectTargetX = currentSeqX + gapAfterLastMachine;
+      const finalX = getNextValidX(inspectTargetX - bounds.minWorldX, bounds.totalWidth, activeZones);
       const autoZ = midZ + 0.8;
-      const isFresh = mRaw.position.x === 0 && mRaw.position.z === 0;
-      let targetX = isFresh ? autoX : Math.max(mRaw.position.x, autoX);
-      let finalZ = isFresh ? autoZ : mRaw.position.z;
-      if (!isFresh) {
-        const lastProdX = reLayouted.length > 0
-          ? Math.max(...reLayouted.map(p => p.position.x + getMachineZoneDims(p.operation.machine_type).length))
-          : startX;
-        targetX = Math.max(targetX, lastProdX + 0.2);
-      }
-      const finalX = getNextValidX(targetX, bounds.totalWidth, activeZones);
       currentSeqX = Math.max(currentSeqX, finalX + bounds.maxWorldX) + 0.1;
-      return { ...mRaw, position: { x: finalX, y: 0, z: finalZ }, rotation: { x: 0, y: ry, z: 0 }, lane, section: spatialInfo.section };
+      return { ...mRaw, position: { x: finalX, y: 0, z: autoZ }, rotation: { x: 0, y: ry, z: 0 }, lane, section: spatialInfo.section };
     });
-
     const finalSupers = supermarketList.map(mRaw => {
-      const isBeingDragged = movingIds.includes(mRaw.id);
-      const superDims = getMachineZoneDims('supermarket');
-      const spatialAtStart = getSpatialInfo(mRaw.position.x, mRaw.position.z, mRaw.section);
-      const laneAtStart = spatialAtStart.lane;
-      let ry = -Math.PI / 2;
-      if (isAssembly) {
-        if (laneAtStart === 'B') ry = -Math.PI / 2;
-        else if (laneAtStart === 'A') ry = Math.PI / 2;
-        else if (laneAtStart === 'D') ry = Math.PI / 2;
-        else if (laneAtStart === 'C') ry = 0;
-      } else {
-        ry = (laneAtStart === 'A' || laneAtStart === 'C') ? 0 : Math.PI;
-      }
-      const bounds = computeFootprint('supermarket', superDims, ry);
-      const superXStart = getNextValidX(currentSeqX + 0.5, superDims.width, activeZones);
-      const autoX = superXStart - bounds.minWorldX;
-      const autoZ = midZ + 0.8;
-      const isFresh = mRaw.position.x === 0 && mRaw.position.z === 0;
-      let targetX = isFresh ? autoX : Math.max(mRaw.position.x, autoX);
-      if (!isAssembly) targetX = Math.min(targetX, ASSEMBLY_START_X - bounds.totalWidth - 0.5);
-      const finalX = getNextValidX(targetX, bounds.totalWidth, activeZones);
-      currentSeqX = (isFresh || isFinalCommit || isBeingDragged)
-        ? (Math.max(currentSeqX, finalX + bounds.maxWorldX) + 0.5)
-        : (currentSeqX + superDims.width);
-      const spatialFinal = getSpatialInfo(finalX, isFresh ? autoZ : mRaw.position.z, mRaw.section);
-      return {
-        ...mRaw,
-        position: { x: finalX, y: 0, z: isFresh ? autoZ : mRaw.position.z },
-        rotation: { x: 0, y: ry, z: 0 },
-        lane: spatialFinal.lane,
-        section: spatialFinal.section
-      };
+      return { ...mRaw };
     });
 
     const allFinalX = [...reLayouted, ...finalInspections, ...finalSupers].map(m => m.position.x);
@@ -1186,8 +969,7 @@ export const useLineStore = create<LineStore>()(persist((set, get) => ({
     const segment = activeZones.find(z => startX >= z.start && startX <= z.end);
     if (segment && maxSectionX > segment.end + 0.1) {
       const errorMsg = `No space in ${secLower}`;
-      if (isFinalCommit && get().layoutError !== errorMsg) {
-        toast.error(`Architecture Alert: This is not possible because no space in ${secLower}!`);
+      if (isFinalCommit) {
         set({ layoutError: errorMsg });
       }
     } else {
@@ -1237,6 +1019,27 @@ export const useLineStore = create<LineStore>()(persist((set, get) => ({
     set({ machineLayout: result });
   },
 
+  fetchAndApplyOB: async (lineNo, styleNo, conNo) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/get-ob?line_no=${encodeURIComponent(lineNo)}&style_no=${encodeURIComponent(styleNo)}&con_no=${encodeURIComponent(conNo)}`);
+      if (!res.ok) throw new Error("OB not found"); const data = await res.json();
+      console.log(`[Store] Applying custom OB from server for ${styleNo}`);
+      const allOps: Operation[] = data.operations || [];
+      // Split into layout ops and preparatory ops (same filter as obParser)
+      const PREP_NAMES = [
+        'washing allowance', 'washing_allowance', 'right placket tape iron', 'gusset iron',
+        'press sleeve placket', 'press pocket', 'right placket self fold iron',
+        'left placket self fold iron', 'stitch tape to pocket', 'triangle patch ironing',
+        'pocket overlock', 'pocket iron with fusing', 'pocket hem stitch',
+      ];
+      const layoutOps = allOps.filter(op => !PREP_NAMES.some(p => op.op_name?.toLowerCase().includes(p)) && !op.op_name?.toLowerCase().includes('allowance'));
+      const prepOps = allOps.filter(op => PREP_NAMES.some(p => op.op_name?.toLowerCase().includes(p)) || op.op_name?.toLowerCase().includes('allowance'));
+      get().updateLineWithNewOB(layoutOps, undefined, prepOps);
+    } catch (err) {
+      console.error("[Store] Error fetching OB from server:", err);
+    }
+  }
+
 }), {
   name: 'line-store',
 
@@ -1247,6 +1050,7 @@ export const useLineStore = create<LineStore>()(persist((set, get) => ({
     currentLine: state.currentLine,
     machineLayout: state.machineLayout,
     operations: state.operations,
+    preparatoryOps: state.preparatoryOps,
     sectionLayout: state.sectionLayout,
     targetOutput: state.targetOutput,
     workingHours: state.workingHours,

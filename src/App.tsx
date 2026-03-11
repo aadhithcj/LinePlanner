@@ -19,7 +19,11 @@ import VirtualLineOverview from "./pages/VirtualLine/VirtualLineOverview";
 import VirtualFloor from "./pages/VirtualLine/VirtualFloor";
 import LineScheduleDetails from "./pages/VirtualLine/LineScheduleDetails";
 import CotTracker from "./pages/VirtualLine/CotTracker";
+import StyleOB from "./features/Cutting/StyleOB";
 import { Navigate } from "react-router-dom";
+
+/* DIGITAL TWIN MODULE */
+import DigitalTwinPage from "./pages/DigitalTwin/DigitalTwinPage";
 
 const queryClient = new QueryClient();
 
@@ -48,7 +52,11 @@ export default function App() {
               <Route path="floor" element={<VirtualFloor />} />
               <Route path="schedule" element={<LineScheduleDetails />} />
               <Route path="tracker" element={<CotTracker />} />
+              <Route path="ob" element={<StyleOB />} />
             </Route>
+
+            {/* DIGITAL TWIN MODULE */}
+            <Route path="/digital-twin" element={<DigitalTwinPage />} />
 
           </Routes>
         </BrowserRouter>

@@ -1,15 +1,17 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Factory, Hash, Shirt, Spool, Activity, Target, Clock } from "lucide-react";
+import { ArrowLeft, Factory, Hash, Shirt, Spool, Activity, Target, Clock, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FileUploadZone } from "@/components/ui/FileUploadZone";
 import { AnimatedBackground } from "@/components/ui/AnimatedBackground";
 import { useLineStore } from "@/store/useLineStore";
 import { parseOBExcel } from "@/utils/obParser";
 import { useToast } from "@/hooks/use-toast";
 import type { Operation } from "@/types";
+import { API_BASE_URL } from "../../config";
 
 const DEFAULT_LINES = [
   "LINE 1", "LINE 2", "LINE 3", "LINE 4", "LINE 5",
@@ -27,11 +29,13 @@ const CreateLinePage = () => {
   const [lineNo, setLineNo] = useState("");
   const [styleNo, setStyleNo] = useState("");
   const [coneNo, setConeNo] = useState("");
-  const [efficiency, setEfficiency] = useState("100");
-  const [targetOutput, setTargetOutput] = useState("1000");
+  const [buyer, setBuyer] = useState("");
+  const [efficiency, setEfficiency] = useState("90");
+  const [targetOutput, setTargetOutput] = useState("1800");
   const [workingHours, setWorkingHours] = useState("9");
 
   const [lines, setLines] = useState<string[]>(DEFAULT_LINES);
+  const [cons, setCons] = useState<string[]>([]);
   const [styles, setStyles] = useState<string[]>([]);
   const [cones, setCones] = useState<string[]>([]);
 
@@ -53,7 +57,7 @@ const CreateLinePage = () => {
 
   // ── Backend data loaders ───────────────────────────────────────────────────
   useEffect(() => {
-    fetch("http://localhost:4000/lines")
+    fetch(`${API_BASE_URL}/lines`)
       .then(res => res.json())
       .then(data => {
         const merged = Array.from(new Set([...DEFAULT_LINES, ...data]));
@@ -62,19 +66,30 @@ const CreateLinePage = () => {
       .catch(() => { });
   }, []);
 
-  const loadStyles = (line: string) => {
+  // Load buyers (Column A) for a given line
+  const loadBuyers = (line: string) => {
     if (!line) return;
-    fetch(`http://localhost:4000/styles?line=${line}`)
+    fetch(`${API_BASE_URL}/cons?line=${encodeURIComponent(line)}`)
       .then(res => res.json())
-      .then(data => setStyles(data))
+      .then(data => setCons(data))
       .catch(() => { });
   };
 
-  const loadCones = (line: string, style: string) => {
-    if (!line || !style) return;
-    fetch(`http://localhost:4000/oc?line=${line}&style=${encodeURIComponent(style)}`)
+  // Load Con Nos / OC (Column B) for a given line + buyer
+  const loadConNos = (line: string, buyerVal: string) => {
+    if (!line || !buyerVal) return;
+    fetch(`${API_BASE_URL}/oc-by-buyer?line=${encodeURIComponent(line)}&buyer=${encodeURIComponent(buyerVal)}`)
       .then(res => res.json())
       .then(data => setCones(data))
+      .catch(() => { });
+  };
+
+  // Load Styles (Column E) for a given line + Con No
+  const loadStylesByConNo = (line: string, oc: string) => {
+    if (!line || !oc) return;
+    fetch(`${API_BASE_URL}/styles-by-oc?line=${encodeURIComponent(line)}&oc=${encodeURIComponent(oc)}`)
+      .then(res => res.json())
+      .then(data => setStyles(data))
       .catch(() => { });
   };
 
@@ -92,15 +107,17 @@ const CreateLinePage = () => {
     updateLineWithNewOB([], "");
 
     try {
-      const { operations, totalSMV, machineTypesCount, sourceSheet: sheetName } = await parseOBExcel(file);
+      const { operations, preparatoryOps, buyer: parsedBuyer, totalSMV, machineTypesCount, sourceSheet: sheetName } = await parseOBExcel(file);
 
       if (!operations || operations.length === 0) {
         throw new Error("No operations found in the uploaded Excel file.");
       }
 
       updateLineWithNewOB(operations, sheetName);
+      useLineStore.getState().setPreparatoryOps(preparatoryOps || []);
 
       setParsedOperations(operations);
+      if (parsedBuyer) setBuyer(parsedBuyer);
       setParsedTotalSMV(totalSMV);
       setExactMachineCount(machineTypesCount);
       setSourceSheet(sheetName);
@@ -117,8 +134,8 @@ const CreateLinePage = () => {
 
   // ── Create line ────────────────────────────────────────────────────────────
   const handleCreateLine = useCallback(() => {
-    if (!lineNo || !styleNo || !coneNo) {
-      toast({ title: "Missing Fields", description: "Please select Line, Style and Cone number.", variant: "destructive" });
+    if (!lineNo || !buyer || !styleNo || !coneNo) {
+      toast({ title: "Missing Fields", description: "Please select Line, Con, Style and Con No.", variant: "destructive" });
       return;
     }
 
@@ -131,17 +148,19 @@ const CreateLinePage = () => {
       lineNo,
       styleNo,
       coneNo,
+      buyer,
       parsedOperations,
-      parseFloat(efficiency || "100"),
-      parseFloat(targetOutput || "1000"),
+      parseFloat(efficiency || "90"),
+      parseFloat(targetOutput || "1800"),
       parsedTotalSMV,
       parseFloat(workingHours || "9"),
-      sourceSheet
+      sourceSheet,
+      useLineStore.getState().preparatoryOps || []
     );
     saveLine(line);
     toast({ title: "Line Created Successfully", description: `${lineNo} created.` });
     navigate("/line-planner/planner");
-  }, [lineNo, styleNo, coneNo, parsedOperations, parsedTotalSMV, efficiency, targetOutput, workingHours, sourceSheet, createLine, saveLine, navigate, toast]);
+  }, [lineNo, styleNo, coneNo, buyer, parsedOperations, parsedTotalSMV, efficiency, targetOutput, workingHours, sourceSheet, createLine, saveLine, navigate, toast]);
 
   return (
     <div className="min-h-screen relative overflow-hidden">
@@ -160,31 +179,79 @@ const CreateLinePage = () => {
 
         <div className="max-w-2xl mx-auto glass-card rounded-2xl p-8 space-y-8">
           <div className="flex flex-col gap-6">
+            {/* 1. Line Number */}
             <div className="space-y-2">
               <Label className="flex items-center gap-2"><Hash className="w-4 h-4" /> Line Number</Label>
-              <select value={lineNo} onChange={(e) => { setLineNo(e.target.value); setStyleNo(""); setConeNo(""); loadStyles(e.target.value); }} className="w-full h-10 rounded-md border px-3 bg-white text-black">
-                <option value="">Select Line</option>
-                {lines.map(line => <option key={line} value={line}>{line}</option>)}
-              </select>
+              <Select value={lineNo} onValueChange={(val) => {
+                setLineNo(val);
+                setBuyer(""); setConeNo(""); setStyleNo("");
+                setCons([]); setCones([]); setStyles([]);
+                loadBuyers(val);
+              }}>
+                <SelectTrigger className="w-full h-10 bg-white text-black">
+                  <SelectValue placeholder="Select Line" />
+                </SelectTrigger>
+                <SelectContent>
+                  {lines.map(line => <SelectItem key={line} value={line}>{line}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
 
+            {/* 2. Buyer — filtered by Line */}
             <div className="space-y-2">
-              <Label className="flex items-center gap-2"><Shirt className="w-4 h-4" /> Style Number</Label>
-              <input list="styleList" value={styleNo} onChange={(e) => { setStyleNo(e.target.value); setConeNo(""); loadCones(lineNo, e.target.value); }} className="w-full h-10 rounded-md border px-3" />
-              <datalist id="styleList">{styles.map(style => <option key={style} value={style} />)}</datalist>
+              <Label className="flex items-center gap-2"><Users className="w-4 h-4" /> Buyer</Label>
+              <Select value={buyer} disabled={!lineNo} onValueChange={(val) => {
+                setBuyer(val);
+                setConeNo(""); setStyleNo("");
+                setCones([]); setStyles([]);
+                loadConNos(lineNo, val);
+              }}>
+                <SelectTrigger className="w-full h-10 bg-white text-black">
+                  <SelectValue placeholder="Select Buyer" />
+                </SelectTrigger>
+                <SelectContent>
+                  {cons.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
 
+            {/* 3. Con No — filtered by Buyer */}
             <div className="space-y-2">
-              <Label className="flex items-center gap-2"><Spool className="w-4 h-4" /> Cone Number</Label>
-              <input list="coneList" value={coneNo} onChange={(e) => setConeNo(e.target.value)} className="w-full h-10 rounded-md border px-3" />
-              <datalist id="coneList">{cones.map(cone => <option key={cone} value={cone} />)}</datalist>
+              <Label className="flex items-center gap-2"><Spool className="w-4 h-4" /> Con No</Label>
+              <Select value={coneNo} disabled={!buyer} onValueChange={(val) => {
+                setConeNo(val);
+                setStyleNo(""); setStyles([]);
+                loadStylesByConNo(lineNo, val);
+              }}>
+                <SelectTrigger className="w-full h-10 bg-white text-black">
+                  <SelectValue placeholder="Select Con No" />
+                </SelectTrigger>
+                <SelectContent>
+                  {cones.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
 
+            {/* 4. Style No — filtered by Con No */}
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2"><Shirt className="w-4 h-4" /> Style No</Label>
+              <Select value={styleNo} disabled={!coneNo} onValueChange={(val) => setStyleNo(val)}>
+                <SelectTrigger className="w-full h-10 bg-white text-black">
+                  <SelectValue placeholder="Select Style No" />
+                </SelectTrigger>
+                <SelectContent>
+                  {styles.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* 5. Target Output */}
             <div className="space-y-2">
               <Label className="flex items-center gap-2"><Target className="w-4 h-4" /> Target Output/Day</Label>
               <input type="number" value={targetOutput} onChange={(e) => setTargetOutput(e.target.value)} className="w-full h-10 rounded-md border px-3" />
             </div>
 
+            {/* 6. Efficiency */}
             <div className="space-y-2">
               <Label className="flex items-center gap-2"><Activity className="w-4 h-4" /> Efficiency (%)</Label>
               <input type="number" value={efficiency} onChange={(e) => setEfficiency(e.target.value)} className="w-full h-10 rounded-md border px-3" />

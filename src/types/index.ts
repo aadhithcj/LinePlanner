@@ -11,6 +11,7 @@ export interface Operation {
   tool_folder?: string;
   machinist_smv?: number;
   non_machinist_smv?: number;
+  no_of_machines?: number;
 }
 export type ColumnAliases = {
   op_no: string[];
@@ -49,6 +50,7 @@ export interface MachinePosition {
   centerModel?: boolean;
   machineIndex?: number; // 0 for first machine of this op, 1 for second, etc.
   hasManualPosition?: boolean;
+  slotIndex?: number;
 }
 
 export interface SectionLayout {
@@ -62,6 +64,7 @@ export interface SectionLayout {
     z: number;
   };
   color: string;
+  slots?: { position: { x: number; y: number; z: number } }[];
 }
 
 /**
@@ -72,6 +75,7 @@ export interface LineData {
   lineNo: string;
   styleNo: string;
   coneNo: string;
+  buyer?: string;
   createdAt: string;
   updatedAt: string;
   operations: Operation[];
@@ -83,6 +87,7 @@ export interface LineData {
   workingHours: number;
   efficiency?: number;
   sourceSheet?: string;
+  preparatoryOps?: Operation[];
 }
 
 /**

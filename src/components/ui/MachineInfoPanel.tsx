@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Settings, Cpu, Clock, Layers, RotateCw, Trash2, Plus, Edit3, Move, Activity } from 'lucide-react';
 import { useLineStore } from '@/store/useLineStore';
@@ -78,6 +78,15 @@ export const MachineInfoPanel = () => {
     }
   }
 
+  // Reactive section machine list sorted by X position (for hover panel numbered list)
+  const sectionMachines = useMemo(() => {
+    if (!selectedMachine?.section && !operation?.section) return [];
+    const sec = (selectedMachine?.section || operation?.section || "").toLowerCase();
+    return machineLayout
+      .filter(m => (m.section || "").toLowerCase() === sec && !m.isInspection)
+      .sort((a, b) => (a.position?.x ?? 0) - (b.position?.x ?? 0));
+  }, [machineLayout, selectedMachine?.section, operation?.section]);
+
   return (
     <AnimatePresence>
       {selectedMachine && operation && (
@@ -98,13 +107,15 @@ export const MachineInfoPanel = () => {
                 </div>
                 <div>
                   <h3 className="font-semibold text-foreground tracking-tight">
-                    {selectedMachine.machineIndex !== undefined ?
-                      `MC #${selectedMachine.machineIndex + 1}` :
-                      `${selectedMachine.operation.machine_type.toUpperCase()} EQUIPMENT`
-                    }
+                    {(() => {
+                      const posIdx = sectionMachines.findIndex(m => m.id === selectedMachine.id);
+                      const pos = posIdx >= 0 ? posIdx + 1 : (selectedMachine.machineIndex !== undefined ? selectedMachine.machineIndex + 1 : '?');
+                      const total = sectionMachines.length || '?';
+                      return `Machine ${pos} / ${total}`;
+                    })()}
                   </h3>
-                  <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest">
-                    Op #{operation.op_no || "N/A"}
+                  <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest truncate max-w-[160px]">
+                    {operation.op_name || operation.machine_type}
                   </p>
                 </div>
               </div>

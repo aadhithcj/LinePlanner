@@ -10,6 +10,7 @@ import { HumanOperator } from './HumanOperator';
 interface Machine3DProps {
   machineData: MachinePosition;
   relativePosition?: { x: number, y: number, z: number };
+  isOverview?: boolean;
 }
 
 // Maps machine keys (lowercase) to GLB filenames
@@ -37,14 +38,20 @@ const MODEL_MAP: Record<string, string> = {
   pointing: 'pointing mc.glb',
   contour: 'contourmc.glb', // User Requested: contourmc.glb
   iron: 'iron press.glb',
-  press: 'iron press.glb',
+  'iron table': 'iron press.glb',
+  pressing: 'pressing.glb',
+  press: 'pressing.glb',
 
   // Button Family
+  buttonhole: 'buttonhole.glb',
   hole: 'buttonhole.glb',
   bhole: 'buttonhole.glb',
   bholemc: 'buttonhole.glb', // Explicit match for B/Hole M/C
-  button: 'buttonmakinggg.glb',
+  'b/h': 'buttonhole.glb',
+  bh: 'buttonhole.glb',
   buttonmaking: 'buttonmakinggg.glb',
+  buttonsew: 'buttonmakinggg.glb',
+  button: 'buttonmakinggg.glb',
 
   // Others
   bartack: 'bartack.finalglb.glb',
@@ -72,7 +79,14 @@ const getModelUrl = (type: string) => {
   // Clean string for easier matching
   const cleanType = t.replace(/[^a-z0-9]/g, '');
 
-  for (const key of Object.keys(MODEL_MAP)) {
+  // Sort keys by length descending to match most specific names first
+  // (e.g. 'buttonhole' before 'hole', 'trolley' before 'ol')
+  const sortedKeys = Object.keys(MODEL_MAP).sort((a, b) => b.length - a.length);
+
+  for (const key of sortedKeys) {
+    // default override should only be hit if nothing else matches
+    if (key === 'default') continue;
+
     if (t.includes(key) || cleanType.includes(key)) {
       return `/models/${MODEL_MAP[key]}`;
     }
@@ -96,6 +110,8 @@ const getTargetDimensionsMeters = (type: string) => {
     l = 4.5 * FT; w = 3 * FT; h = 4.0 * FT;
   } else if (t.includes('notch')) {
     l = 4 * FT; w = 2.5 * FT; h = 3.5 * FT;
+  } else if (t.includes('pressing') || (t.includes('press') && !t.includes('iron'))) {
+    l = 4.72 * FT; w = 4 * FT; h = 5 * FT;
   } else if (t.includes('iron') || t.includes('press')) {
     l = 4.0 * FT; w = 3.0 * FT; h = 3.0 * FT;
   } else if (t.includes('helper') || t.includes('work table') || t.includes('table') || t.includes('trolley')) {
@@ -163,7 +179,7 @@ const GarmentBundles = () => {
   );
 };
 
-export const Machine3D = ({ machineData, relativePosition }: Machine3DProps) => {
+export const Machine3D = ({ machineData, relativePosition, isOverview }: Machine3DProps) => {
   const rootRef = useRef<THREE.Group>(null);
   const meshRef = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
@@ -181,6 +197,17 @@ export const Machine3D = ({ machineData, relativePosition }: Machine3DProps) => 
 
   // Bottleneck Color Logic
   const { workingHours, efficiency, targetOutput, machineLayout } = useLineStore();
+
+  // Compute this machine's sequential number within its section (sorted by X position)
+  const sectionMcNumber = useMemo(() => {
+    const sec = (machineData.section || machineData.operation.section || "").toLowerCase();
+    const secMachines = machineLayout
+      .filter(m => (m.section || "").toLowerCase() === sec && !m.isInspection)
+      .sort((a, b) => a.position.x - b.position.x);
+    const idx = secMachines.findIndex(m => m.id === machineData.id);
+    return { pos: idx >= 0 ? idx + 1 : '?', total: secMachines.length };
+  }, [machineLayout, machineData.id, machineData.section, machineData.operation.section]);
+
   const bottleneckColor = useMemo(() => {
     if (!machineData.operation || machineData.operation.smv <= 0) return null;
 
@@ -227,15 +254,6 @@ export const Machine3D = ({ machineData, relativePosition }: Machine3DProps) => 
           <boxGeometry args={[1.5, 0.5, 0.1]} />
           <meshStandardMaterial color="#ffffff" />
         </mesh>
-        <Text
-          position={[0, 0, 0.06]}
-          fontSize={0.2}
-          color="#000000"
-          anchorX="center"
-          anchorY="middle"
-        >
-          {machineData.section}
-        </Text>
       </group>
     );
   }
@@ -283,22 +301,9 @@ export const Machine3D = ({ machineData, relativePosition }: Machine3DProps) => 
           dashSize={0.2}
           gapSize={0.1}
         />
-        <Text
-          position={[0, 0.2, 0]}
-          fontSize={0.12}
-          color="#555"
-          rotation={[-Math.PI / 2, 0, 0]}
-          fontWeight="bold"
-        >
-          {isUnused ? "UNUSED POSITION" : machineData.operation.machine_type.toUpperCase()}
-        </Text>
       </group>
     );
   }
-
-
-
-
 
   // Handle centering logic once when model loads
   useLayoutEffect(() => {
@@ -435,8 +440,8 @@ export const Machine3D = ({ machineData, relativePosition }: Machine3DProps) => 
         {/* 3D Model */}
         <primitive object={clonedScene} castShadow receiveShadow />
 
-        {/* Garment Bundles for Supermarket */}
-        {mType.includes('supermarket') && <GarmentBundles />}
+        {/* Garment Bundles for Supermarket - Hidden in Overview for performance */}
+        {mType.includes('supermarket') && !isOverview && <GarmentBundles />}
 
         {/* Bottleneck Status Ring (Always Visible) */}
         {bottleneckColor && (
@@ -456,57 +461,42 @@ export const Machine3D = ({ machineData, relativePosition }: Machine3DProps) => 
 
         {/* Info Label (Visible on Hover) */}
         {(hovered && !isSelected) && (
-          <Html position={[0, 2, 0]} center style={{ pointerEvents: 'none' }}>
-            <div className="bg-black/90 text-white px-2.5 py-2.0 rounded-lg text-xs whitespace-nowrap backdrop-blur-md pointer-events-none border border-white/20 shadow-xl min-w-[140px]">
-              <div className="flex items-center justify-between gap-4 mb-2 pb-1.5 border-b border-white/10">
-                <div className="font-black text-primary uppercase tracking-tight">
+          <Html position={[0, 2.2, 0]} center style={{ pointerEvents: 'none' }}>
+            <div style={{
+              background: 'rgba(10,10,20,0.97)',
+              border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: '12px',
+              padding: '8px 12px',
+              minWidth: '140px',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+              backdropFilter: 'blur(16px)',
+              pointerEvents: 'none',
+              fontFamily: 'system-ui, sans-serif',
+            }}>
+              {/* Machine type badge */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '5px' }}>
+                <span style={{ fontSize: '9px', fontWeight: 900, color: '#6366f1', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
                   {machineData.operation.machine_type}
-                </div>
-                {machineData.machineIndex !== undefined && (
-                  <div className="bg-primary/20 px-1.5 py-0.5 rounded text-[9px] font-black text-primary border border-primary/30">
-                    #{machineData.machineIndex + 1}
-                  </div>
-                )}
-              </div>
-
-              {/* Show operation name if it's different and relevant */}
-              {machineData.operation.op_name.toLowerCase() !== machineData.operation.machine_type.toLowerCase() && (
-                <p className="text-[10px] text-white/90 font-bold mb-0.5">{machineData.operation.op_name}</p>
-              )}
-
-              <div className="flex items-center gap-2">
-                <span className="text-[8px] bg-white/10 px-1 rounded text-white/50 font-bold uppercase tracking-widest">
-                  Op {machineData.operation.op_no || "N/A"}
+                </span>
+                <span style={{ fontSize: '10px', fontWeight: 900, color: '#111827', backgroundColor: '#eab308', padding: '1px 6px', borderRadius: '4px', letterSpacing: '0.05em', boxShadow: '0 2px 4px rgba(234,179,8,0.3)' }}>
+                  MC {sectionMcNumber.pos}
                 </span>
               </div>
-
-              {machineData.machineIndex !== undefined && (
-                <div className="mt-1.5 pt-1.5 border-t border-white/5 flex items-center justify-between">
-                  <span className="text-[9px] text-gray-500 font-bold uppercase tracking-tighter">Work Content</span>
-                  <span className="text-accent font-bold text-[10px]">{machineData.operation.smv?.toFixed(2)} min</span>
-                </div>
-              )}
+              {/* Operation name */}
+              <div style={{ fontSize: '11px', fontWeight: 700, color: '#ffffff', lineHeight: 1.3, marginBottom: '5px', maxWidth: '180px', wordBreak: 'break-word' }}>
+                {machineData.operation.op_name || machineData.operation.machine_type}
+              </div>
+              {/* Section + SMV row */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '4px' }}>
+                <span style={{ fontSize: '8px', color: 'rgba(255,255,255,0.4)', fontWeight: 700 }}>{machineData.section}</span>
+                <span style={{ marginLeft: 'auto', fontSize: '9px', color: '#10b981', fontWeight: 900 }}>{machineData.operation.smv?.toFixed(2)} min</span>
+              </div>
             </div>
           </Html>
         )}
-        {/* Machine Type Label (Always Visible) */}
-        {!mType.includes('pathway') && !mType.startsWith('board') && (
-          <Text
-            position={[0, 1.25, 0]}
-            fontSize={0.15}
-            color="white"
-            anchorX="center"
-            anchorY="middle"
-            fontWeight="bold"
-            outlineWidth={0.02}
-            outlineColor="#000000"
-          >
-            {machineData.operation.machine_type.toUpperCase()}
-          </Text>
-        )}
       </group>
 
-      {/* Human Operator */}
+      {/* Human Operator - RESTORED visibility for all modes */}
       {needsOperator && (() => {
         const isRotated90 = Math.abs(machineData.rotation.y % Math.PI) > 0.1;
         const operatorOffsetZ = isRotated90 ? -0.25 : 0;
@@ -530,7 +520,7 @@ export const Machine3D = ({ machineData, relativePosition }: Machine3DProps) => 
         );
       })()}
 
-      {/* Ground Zone Area Border */}
+      {/* Ground Zone Area Border - RESTORED visibility for all modes */}
       {(() => {
         let humanMaxZ = 0;
         if (needsOperator) {

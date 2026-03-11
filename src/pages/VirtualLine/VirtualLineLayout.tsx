@@ -1,16 +1,22 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate, useLocation, Outlet, useSearchParams } from "react-router-dom";
 import {
     LayoutDashboard,
-    Map,
     Activity,
     ChevronLeft,
     Factory,
     Menu,
     X,
     Filter,
-    BarChart3
+    BarChart3,
+    Hash,
+    Layout,
+    PlusSquare,
+    Map,
+    ArrowUpRight,
+    ChevronDown,
+    Layers
 } from "lucide-react";
 import {
     DropdownMenu,
@@ -20,13 +26,18 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { API_BASE_URL } from "../../config";
 
 const NAV_ITEMS = [
-    { id: "overview", label: "Overview", icon: LayoutDashboard, path: "/virtual-line/overview" },
-    { id: "floor", label: "Virtual Floor", icon: Map, path: "/virtual-line/floor" },
-    { id: "tracker", label: "COT Tracker", icon: Activity, path: "/virtual-line/tracker" },
-    { id: "dashboard", label: "Dashboard", icon: BarChart3, path: "/virtual-line/analytics" }
+    { id: "overview", label: 'Overview', icon: LayoutDashboard, path: '/virtual-line/overview' },
+    { id: "floor", label: 'Floor View', icon: Map, path: '/virtual-line/floor' },
+    { id: "tracker", label: 'COT Tracker', icon: Activity, path: '/virtual-line/tracker' },
+    { id: "ob", label: 'Style OB', icon: Layers, path: '/virtual-line/ob' },
+    { id: "dashboard", label: 'Dashboard', icon: Layout, path: '/' },
 ];
+
+// This will be replaced by dynamic data in the component
+let COT_DATA: any[] = [];
 
 export default function VirtualLineLayout() {
     const navigate = useNavigate();
@@ -37,6 +48,30 @@ export default function VirtualLineLayout() {
     // Determine active tab based on path
     const currentPath = location.pathname;
     const activeFloor = searchParams.get("floor") || "Floor 1";
+    const activeLine = searchParams.get("line");
+
+    const [liveCotData, setLiveCotData] = useState<any[]>([]);
+
+    useEffect(() => {
+        const fetchStatus = async () => {
+            try {
+                const res = await fetch(`${API_BASE_URL}/current-styles`);
+                if (res.ok) {
+                    const data = await res.json();
+                    setLiveCotData(data);
+                }
+            } catch (err) {
+                console.error("Error fetching live status:", err);
+            }
+        };
+        fetchStatus();
+        const interval = setInterval(fetchStatus, 15000);
+        return () => clearInterval(interval);
+    }, []);
+
+    const activeLineData = liveCotData.find(i => i.line_no === activeLine);
+    const isChangeover = activeLineData?.status === 'Changeover';
+    const isRunning = activeLineData?.status === 'Running';
 
     return (
         <div className="flex h-screen bg-[#f8fafc] overflow-hidden">
@@ -144,93 +179,139 @@ export default function VirtualLineLayout() {
 
             {/* Main Content Area */}
             <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
-                <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 shrink-0 relative z-20">
+                <header className="h-20 bg-white border-b border-slate-200 flex items-center justify-between px-8 shrink-0 relative z-20">
                     <div className="flex items-center gap-4">
                         {currentPath !== "/virtual-line/overview" && (
                             <button
-                                onClick={() => navigate("/virtual-line/overview")}
+                                onClick={() => navigate(-1)}
                                 className="group flex items-center justify-center w-8 h-8 rounded-lg bg-slate-50 border border-slate-200 text-slate-400 hover:text-purple-600 hover:border-purple-200 hover:bg-purple-50 transition-all duration-300 shadow-sm"
                             >
                                 <ChevronLeft className="w-4 h-4 transition-transform group-hover:-translate-x-0.5" />
                             </button>
                         )}
-                        <h2 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] flex items-center gap-2">
+                        <h2 className="text-[13px] font-black text-slate-900 uppercase tracking-[0.2em] flex items-center gap-3">
                             {currentPath !== "/virtual-line/overview" && <span className="text-slate-300 font-medium">/</span>}
                             {NAV_ITEMS.find(item => item.path === currentPath)?.label ||
                                 (currentPath.includes('schedule') ? "Line Schedule" : "Virtual Line")}
                         </h2>
 
-                        {currentPath === "/virtual-line/floor" && (
-                            <div className="flex items-center gap-3">
-                                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-inner">
-                                    {["Floor 1", "Floor 2"].map((floor) => (
+                        {(currentPath === "/virtual-line/floor" || (currentPath === "/virtual-line/tracker" && searchParams.get("line"))) && (
+                            <div className="flex items-center gap-1 ml-4 bg-slate-100/50 p-1 rounded-2xl border border-slate-200/60 shadow-inner">
+                                {searchParams.get("line") && activeLineData && (
+                                    <div className="flex items-center gap-1 border-r border-slate-200/60 pr-1 mr-1">
+                                        {/* Current Style - Click to see Layout */}
                                         <button
-                                            key={floor}
-                                            onClick={() => {
-                                                setSearchParams({ floor, line: "All Lines" }, { replace: true });
-                                            }}
-                                            className={cn(
-                                                "px-4 py-1.5 rounded-lg text-[10px] font-black transition-all uppercase tracking-wider shadow-sm",
-                                                activeFloor === floor
-                                                    ? "bg-purple-600 text-white shadow-md shadow-purple-200 border border-purple-700"
-                                                    : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
-                                            )}
+                                            onClick={() => navigate(`/virtual-line/floor?${searchParams.toString()}`)}
+                                            className="flex flex-col items-start px-4 py-2 rounded-xl hover:bg-white transition-all shrink-0 text-left group/run"
                                         >
-                                            {floor}
+                                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1.5 group-hover/run:text-slate-600 transition-colors">
+                                                {isRunning ? 'Running Style' : 'Changeover Style'}
+                                            </span>
+                                            <div className="flex items-center gap-2.5">
+                                                <div className={cn("w-1.5 h-1.5 rounded-full", isRunning ? "bg-emerald-500" : "bg-indigo-500 animate-pulse")} />
+                                                <span className="text-slate-900 font-black text-[13px] tracking-tight">{activeLineData.style_no}</span>
+                                            </div>
                                         </button>
-                                    ))}
-                                </div>
+                                    </div>
+                                )}
 
-                                <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            className={cn(
-                                                "h-9 px-3 gap-2 font-bold text-[10px] uppercase tracking-wider rounded-xl transition-all shadow-sm",
-                                                searchParams.get("line") && searchParams.get("line") !== "All Lines"
-                                                    ? "bg-purple-600 text-white border-purple-700 shadow-md shadow-purple-200 hover:bg-purple-700 hover:text-white"
-                                                    : "border-slate-200 text-slate-600 hover:bg-slate-50"
-                                            )}
-                                        >
-                                            <Filter className="w-3.5 h-3.5" />
-                                            {searchParams.get("line") || "All Lines"}
-                                        </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end" className="w-48 p-1 rounded-xl shadow-xl border-slate-200">
-                                        <DropdownMenuItem
-                                            onClick={() => setSearchParams({ floor: activeFloor, line: "All Lines" }, { replace: true })}
-                                            className="text-[10px] font-bold uppercase tracking-wider p-3 rounded-lg cursor-pointer"
-                                        >
-                                            All Lines
-                                        </DropdownMenuItem>
-                                        {(activeFloor === "Floor 1" ? [1, 2, 3, 4, 5, 6, 7] : [8, 9]).map(num => (
-                                            <DropdownMenuItem
-                                                key={num}
-                                                onClick={() => setSearchParams({ floor: activeFloor, line: `Line ${num}` }, { replace: true })}
-                                                className="text-[10px] font-bold uppercase tracking-wider p-3 rounded-lg cursor-pointer"
-                                            >
-                                                Line {num}
-                                            </DropdownMenuItem>
-                                        ))}
-                                    </DropdownMenuContent>
-                                </DropdownMenu>
+                                {currentPath === "/virtual-line/floor" ? (
+                                    <div className="flex items-center gap-1">
+                                        {/* Floor Toggle */}
+                                        <div className="flex items-center gap-1 bg-white/50 p-1 rounded-2xl border border-slate-200/50 mr-2">
+                                            {["Floor 1", "Floor 2"].map((f) => (
+                                                <button
+                                                    key={f}
+                                                    onClick={() => setSearchParams({ floor: f, line: activeLine || "All Lines" })}
+                                                    className={cn(
+                                                        "px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+                                                        activeFloor === f
+                                                            ? "bg-slate-900 text-white shadow-md"
+                                                            : "text-slate-500 hover:text-slate-900"
+                                                    )}
+                                                >
+                                                    {f}
+                                                </button>
+                                            ))}
+                                        </div>
+
+                                        {/* Line Filter */}
+                                        <DropdownMenu>
+                                            <DropdownMenuTrigger asChild>
+                                                <button className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-slate-200 hover:border-purple-200 text-slate-700 hover:text-purple-600 transition-all">
+                                                    <Filter size={14} className="text-slate-400" />
+                                                    <span className="text-[10px] font-black uppercase tracking-widest">
+                                                        {searchParams.get("line") || "All Lines"}
+                                                    </span>
+                                                    <ChevronDown size={14} className="text-slate-400" />
+                                                </button>
+                                            </DropdownMenuTrigger>
+                                            <DropdownMenuContent align="end" className="w-[180px] rounded-2xl p-2 border-slate-200 shadow-xl overflow-hidden overscroll-contain max-h-[400px]">
+                                                <DropdownMenuItem
+                                                    onClick={() => {
+                                                        const params = new URLSearchParams(searchParams);
+                                                        params.set("line", "All Lines");
+                                                        setSearchParams(params);
+                                                    }}
+                                                    className="rounded-xl px-4 py-2.5 text-[10px] font-black uppercase tracking-wider focus:bg-purple-50 focus:text-purple-600 cursor-pointer"
+                                                >
+                                                    All Lines
+                                                </DropdownMenuItem>
+                                                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+                                                    <DropdownMenuItem
+                                                        key={num}
+                                                        onClick={() => {
+                                                            const floor = num <= 6 ? "Floor 1" : "Floor 2";
+                                                            setSearchParams({ floor, line: `Line ${num}` });
+                                                        }}
+                                                        className="rounded-xl px-4 py-2.5 text-[10px] font-black uppercase tracking-wider focus:bg-purple-50 focus:text-purple-600 cursor-pointer"
+                                                    >
+                                                        Line {num}
+                                                    </DropdownMenuItem>
+                                                ))}
+                                            </DropdownMenuContent>
+                                        </DropdownMenu>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center gap-1">
+                                        {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => {
+                                            const lineName = `Line ${num}`;
+                                            const isActive = searchParams.get("line") === lineName;
+                                            const isCOT = liveCotData.find(d => d.line_no === lineName)?.status === 'Changeover';
+                                            const floor = num <= 6 ? "Floor 1" : "Floor 2";
+
+                                            return (
+                                                <button
+                                                    key={num}
+                                                    onClick={() => setSearchParams({ floor, line: lineName })}
+                                                    className={cn(
+                                                        "relative px-3.5 py-3 rounded-xl text-[12px] font-black transition-all uppercase tracking-wider flex-shrink-0",
+                                                        isActive
+                                                            ? "bg-slate-900 text-white shadow-lg"
+                                                            : "text-slate-500 hover:text-slate-900 hover:bg-white"
+                                                    )}
+                                                >
+                                                    L{num}
+                                                    {isCOT && !isActive && (
+                                                        <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-indigo-500 rounded-full border border-white animate-pulse" />
+                                                    )}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
 
                     <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-100">
-                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                            Live Sync
-                        </div>
-                        <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 shadow-sm" />
+                        <div className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 shadow-sm" />
                     </div>
                 </header>
 
                 <div className={cn(
                     "flex-1 overflow-y-auto relative z-10 scroll-smooth",
-                    currentPath === "/virtual-line/floor" ? "p-0" : "p-8"
+                    (currentPath === "/virtual-line/floor" || (currentPath === "/virtual-line/tracker" && searchParams.get("line"))) ? "p-0" : "p-8"
                 )}>
                     <Outlet />
                 </div>
